@@ -118,6 +118,12 @@ export interface ScreenerMatch {
   delivery_pct: number;
   rsi: number;
   supertrend: string;
+  supertrend_val?: number;
+  sma_100?: number;
+  dist_sma100_pct?: number;
+  signal_type: 'BUY' | 'SELL' | 'NEUTRAL';
+  signal_timing?: string;
+  signal_date?: string;
   signal_details: string;
   date: string;
 }
@@ -125,6 +131,8 @@ export interface ScreenerMatch {
 export interface ScreenerResponse {
   universe: string;
   scan_type: string;
+  lookback_days?: number;
+  signal_filter?: string;
   scanned_count: number;
   match_count: number;
   results: ScreenerMatch[];

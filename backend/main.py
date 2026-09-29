@@ -58,8 +58,10 @@ class BacktestRequest(BaseModel):
 
 class ScreenerRequest(BaseModel):
     universe: str = "Nifty 50"
-    scan_type: str = "SuperTrend Bullish Flip"
+    scan_type: str = "SuperTrend + 100 SMA Trend Rider"
     custom_formula: Optional[str] = None
+    lookback_days: int = 3
+    signal_filter: str = "ALL"
 
 # Routes
 @app.get("/api/health")
@@ -283,11 +285,15 @@ def run_screener(req: ScreenerRequest):
     results = screener.scan_universe(
         symbols=symbols,
         scan_type=req.scan_type,
-        custom_formula=req.custom_formula
+        custom_formula=req.custom_formula,
+        lookback_days=req.lookback_days,
+        signal_filter=req.signal_filter
     )
     return {
         "universe": req.universe,
         "scan_type": req.scan_type,
+        "lookback_days": req.lookback_days,
+        "signal_filter": req.signal_filter,
         "scanned_count": len(symbols),
         "match_count": len(results),
         "results": results

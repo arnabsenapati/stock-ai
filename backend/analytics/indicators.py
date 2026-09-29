@@ -264,6 +264,7 @@ class TechnicalIndicators:
         out['ema_200'] = TechnicalIndicators.ema(c, 200)
         out['sma_20'] = TechnicalIndicators.sma(c, 20)
         out['sma_50'] = TechnicalIndicators.sma(c, 50)
+        out['sma_100'] = TechnicalIndicators.sma(c, 100)
         out['sma_200'] = TechnicalIndicators.sma(c, 200)
 
         # Volatility & Bands
