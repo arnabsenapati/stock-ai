@@ -27,6 +27,7 @@ export default function BacktestStudio({ currentSymbol, availableSymbols }: Back
   const [mode, setMode] = useState<'single' | 'basket'>('single');
   const [selectedStock, setSelectedStock] = useState(currentSymbol || 'RELIANCE');
   const [selectedUniverse, setSelectedUniverse] = useState('Nifty 50');
+  const [lookbackPeriod, setLookbackPeriod] = useState<string>('5y');
   
   const [strategyCode, setStrategyCode] = useState<string>(`# SuperTrend + 100 SMA Trend Rider (Optimal)
 # Rule 1: Macro Trend - Only buy stocks above 100-day moving average
@@ -96,6 +97,11 @@ Sell = Close < LLV(Low, 10).shift(1)
     setLoading(true);
     setError(null);
     try {
+      let startDate: string | null = null;
+      if (lookbackPeriod === '3y') startDate = '2023-09-28';
+      else if (lookbackPeriod === '2y') startDate = '2024-09-28';
+      else if (lookbackPeriod === '1y') startDate = '2025-09-28';
+
       const res = await fetch('http://localhost:8000/api/backtest/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -111,7 +117,8 @@ Sell = Close < LLV(Low, 10).shift(1)
           take_profit_pct: takeProfit ? parseFloat(takeProfit) : null,
           trailing_stop_pct: trailingStop ? parseFloat(trailingStop) : null,
           slippage_pct: 0.05,
-          brokerage_pct: 0.10
+          brokerage_pct: 0.10,
+          start_date: startDate
         })
       });
 
@@ -230,6 +237,21 @@ Sell = Close < LLV(Low, 10).shift(1)
               </select>
             </div>
           )}
+
+          {/* Backtest Horizon Selector */}
+          <div>
+            <label className="text-[11px] text-zinc-400 block mb-1">Backtest Horizon / Period</label>
+            <select
+              value={lookbackPeriod}
+              onChange={e => setLookbackPeriod(e.target.value)}
+              className="w-full bg-[#0d1117] border border-zinc-800 text-xs text-zinc-200 rounded-lg px-2.5 py-1.5 font-medium"
+            >
+              <option value="5y">Last 5 Years (Full History: 2021–2026)</option>
+              <option value="3y">Last 3 Years (2023–2026)</option>
+              <option value="2y">Last 2 Years (2024–2026)</option>
+              <option value="1y">Last 1 Year (2025–2026)</option>
+            </select>
+          </div>
 
           {/* Capital & Stops Grid */}
           <div className="grid grid-cols-2 gap-2 text-xs">
