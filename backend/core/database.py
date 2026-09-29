@@ -69,7 +69,7 @@ class DatabaseManager:
         clean_df = clean_df[required_cols].dropna(subset=['open', 'high', 'low', 'close', 'date'])
         clean_df = clean_df.drop_duplicates(subset=['symbol', 'date'])
 
-        # Write to DuckDB
+        # Write to DuckDB with primary key upsert
         with self.get_connection() as con:
             con.register("incoming_df", clean_df)
             con.execute("""
@@ -78,9 +78,10 @@ class DatabaseManager:
                 FROM incoming_df
             """)
 
-        # Also save as Parquet file for fast local reading
-        parquet_file = PARQUET_DIR / f"{symbol.upper()}.parquet"
-        clean_df.to_parquet(parquet_file, index=False)
+            # Export the FULL merged multi-year history to the Parquet cache
+            parquet_file = PARQUET_DIR / f"{symbol.upper()}.parquet"
+            full_df = con.execute("SELECT * FROM eod_prices WHERE symbol = ? ORDER BY date", [symbol.upper()]).df()
+            full_df.to_parquet(parquet_file, index=False)
 
     def get_symbol_data(self, symbol: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
         """Fetch historical data for a symbol sorted by date ascending"""
