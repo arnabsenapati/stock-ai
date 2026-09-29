@@ -14,7 +14,8 @@ class BacktestEngine:
                  take_profit_pct: Optional[float] = None,
                  trailing_stop_pct: Optional[float] = None,
                  slippage_pct: float = 0.05,
-                 brokerage_pct: float = 0.10): # Indian delivery STT + Brokerage approx 0.10%
+                 brokerage_pct: float = 0.10,
+                 execution_timing: str = "next_open"): # 'next_open' or 'same_close'
         self.initial_capital = initial_capital
         self.max_positions = max_positions
         self.risk_per_trade_pct = risk_per_trade_pct
@@ -23,6 +24,7 @@ class BacktestEngine:
         self.trailing_stop_pct = trailing_stop_pct
         self.slippage_pct = slippage_pct / 100.0
         self.brokerage_pct = brokerage_pct / 100.0
+        self.execution_timing = execution_timing
 
     def run_single_stock(self, symbol: str, strategy_code: str, 
                          start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
@@ -32,8 +34,13 @@ class BacktestEngine:
             raise ValueError(f"Insufficient data for symbol {symbol}. Found {len(df)} rows.")
 
         buy_signals, sell_signals = StrategyEvaluator.evaluate(strategy_code, df)
-        df['buy_signal'] = buy_signals
-        df['sell_signal'] = sell_signals
+        df = df.copy()
+        if self.execution_timing == "next_open":
+            df['buy_signal'] = buy_signals.shift(1).fillna(False)
+            df['sell_signal'] = sell_signals.shift(1).fillna(False)
+        else:
+            df['buy_signal'] = buy_signals
+            df['sell_signal'] = sell_signals
 
         return self._simulate_portfolio({symbol: df})
 
@@ -46,8 +53,13 @@ class BacktestEngine:
             if not df.empty and len(df) >= 30:
                 try:
                     buy_sig, sell_sig = StrategyEvaluator.evaluate(strategy_code, df)
-                    df['buy_signal'] = buy_sig
-                    df['sell_signal'] = sell_sig
+                    df = df.copy()
+                    if self.execution_timing == "next_open":
+                        df['buy_signal'] = buy_sig.shift(1).fillna(False)
+                        df['sell_signal'] = sell_sig.shift(1).fillna(False)
+                    else:
+                        df['buy_signal'] = buy_sig
+                        df['sell_signal'] = sell_sig
                     symbol_data[sym] = df
                 except Exception as e:
                     print(f"Skipping {sym} due to evaluation error: {e}")
@@ -117,8 +129,12 @@ class BacktestEngine:
 
                 # Check Sell Signal
                 if exit_price is None and sell_signal:
-                    exit_price = close_price
-                    exit_reason = "Sell Signal"
+                    if self.execution_timing == "next_open":
+                        exit_price = bar['open']
+                        exit_reason = "Sell Signal (Next Open)"
+                    else:
+                        exit_price = close_price
+                        exit_reason = "Sell Signal (EOD Close)"
 
                 # Execute Exit
                 if exit_price is not None:
@@ -162,7 +178,8 @@ class BacktestEngine:
                     if current_date in sym_table.index:
                         bar = sym_table.loc[current_date]
                         if bar.get('buy_signal', False):
-                            candidate_buys.append((sym, bar['close']))
+                            entry_px = bar['open'] if self.execution_timing == "next_open" else bar['close']
+                            candidate_buys.append((sym, entry_px))
 
                 # Allocate capital equally among available candidates
                 for sym, price in candidate_buys[:available_slots]:
@@ -207,6 +224,7 @@ class BacktestEngine:
         monthly_matrix = self._calculate_monthly_returns(equity_curve)
 
         return {
+            "execution_timing": self.execution_timing,
             "metrics": metrics,
             "equity_curve": equity_curve,
             "trades": trades_log,

@@ -53,6 +53,7 @@ class BacktestRequest(BaseModel):
     trailing_stop_pct: Optional[float] = None
     slippage_pct: float = 0.05
     brokerage_pct: float = 0.10
+    execution_timing: str = "next_open"
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
@@ -248,6 +249,7 @@ def run_backtest(req: BacktestRequest):
     engine.trailing_stop_pct = req.trailing_stop_pct
     engine.slippage_pct = req.slippage_pct / 100.0
     engine.brokerage_pct = req.brokerage_pct / 100.0
+    engine.execution_timing = req.execution_timing
 
     try:
         if req.mode == "single":

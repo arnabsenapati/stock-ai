@@ -103,6 +103,7 @@ export interface MonthlyReturnItem {
 }
 
 export interface BacktestResponse {
+  execution_timing?: 'next_open' | 'same_close';
   metrics: BacktestMetrics;
   equity_curve: EquityPoint[];
   trades: TradeItem[];

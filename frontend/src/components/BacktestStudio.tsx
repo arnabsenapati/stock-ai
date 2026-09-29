@@ -14,7 +14,8 @@ import {
   Download,
   Code2,
   Sliders,
-  DollarSign
+  DollarSign,
+  Clock
 } from 'lucide-react';
 import { BacktestResponse } from '../types';
 
@@ -28,6 +29,7 @@ export default function BacktestStudio({ currentSymbol, availableSymbols }: Back
   const [selectedStock, setSelectedStock] = useState(currentSymbol || 'RELIANCE');
   const [selectedUniverse, setSelectedUniverse] = useState('Nifty 50');
   const [lookbackPeriod, setLookbackPeriod] = useState<string>('5y');
+  const [executionTiming, setExecutionTiming] = useState<'next_open' | 'same_close'>('next_open');
   
   const [strategyCode, setStrategyCode] = useState<string>(`# SuperTrend + 100 SMA Trend Rider (Optimal)
 # Rule 1: Macro Trend - Only buy stocks above 100-day moving average
@@ -118,6 +120,7 @@ Sell = Close < LLV(Low, 10).shift(1)
           trailing_stop_pct: trailingStop ? parseFloat(trailingStop) : null,
           slippage_pct: 0.05,
           brokerage_pct: 0.10,
+          execution_timing: executionTiming,
           start_date: startDate
         })
       });
@@ -253,6 +256,49 @@ Sell = Close < LLV(Low, 10).shift(1)
             </select>
           </div>
 
+          {/* Execution Timing Toggle */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] text-zinc-400 font-medium flex items-center gap-1">
+                <Clock className="w-3 h-3 text-emerald-400" /> Execution Timing
+              </label>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {executionTiming === 'next_open' ? 'Zero Lookahead' : 'MOC (3:20 PM)'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#0d1117] border border-zinc-800 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setExecutionTiming('next_open')}
+                className={`py-1.5 px-2 rounded text-[11px] font-semibold flex items-center justify-center gap-1 transition-all ${
+                  executionTiming === 'next_open'
+                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-600/70 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Fill at 9:15 AM Open next morning after EOD signal confirmed"
+              >
+                <span>🌅</span> Next Day Open
+              </button>
+              <button
+                type="button"
+                onClick={() => setExecutionTiming('same_close')}
+                className={`py-1.5 px-2 rounded text-[11px] font-semibold flex items-center justify-center gap-1 transition-all ${
+                  executionTiming === 'same_close'
+                    ? 'bg-blue-950 text-blue-300 border border-blue-600/70 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Fill at 3:20 PM Market-On-Close order"
+              >
+                <span>🕒</span> Same Day Close
+              </button>
+            </div>
+            <div className="text-[10px] text-zinc-500 mt-1">
+              {executionTiming === 'next_open' 
+                ? 'Orders execute at 9:15 AM Open next day (realistic EOD routine)' 
+                : 'Orders execute at 3:20 PM Close on confirming signal candle'}
+            </div>
+          </div>
+
           {/* Capital & Stops Grid */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div>
@@ -340,6 +386,25 @@ Sell = Close < LLV(Low, 10).shift(1)
       {/* Backtest Results Dashboard */}
       {result && (
         <div className="space-y-4">
+          {/* Header with Execution Timing Badge */}
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 border-b border-zinc-800/80">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-white tracking-wide">Simulation Results</span>
+              <span className={`px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 ${
+                result.execution_timing === 'next_open'
+                  ? 'bg-emerald-950/80 border-emerald-600/70 text-emerald-300'
+                  : 'bg-blue-950/80 border-blue-600/70 text-blue-300'
+              }`}>
+                {result.execution_timing === 'next_open' 
+                  ? '🌅 Filled at Next Day Open (9:15 AM - Zero Lookahead)' 
+                  : '🕒 Filled at Same Day Close (3:20 PM - MOC Order)'}
+              </span>
+            </div>
+            <span className="text-[11px] text-zinc-400 font-mono">
+              ₹{result.metrics.initial_capital.toLocaleString()} Initial → ₹{result.metrics.final_equity.toLocaleString()} Equity
+            </span>
+          </div>
+
           {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
             <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
