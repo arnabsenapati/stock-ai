@@ -78,3 +78,26 @@ cd frontend
 npm run dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+### Run as a Background Windows Service (NSSM)
+
+To run the terminal automatically in the background as a persistent Windows Service:
+
+1. **Install and Start Service**:
+   Double-click `install_service.bat` (or run in an elevated PowerShell prompt: `.\install_service.ps1`).
+   - Registers a Windows Service named `StockAI` using NSSM.
+   - Automatically runs both the FastAPI backend and Next.js frontend via [`service_runner.py`](file:///d:/SourceCode/stock-ai/service_runner.py).
+   - Configures automatic restart and daily log rotation under `d:\SourceCode\stock-ai\logs\`.
+
+2. **Stop and Uninstall Service**:
+   Double-click `uninstall_service.bat` to gracefully stop and remove the service.
+
+3. **Manual Service Control**:
+   ```powershell
+   nssm start StockAI
+   nssm stop StockAI
+   nssm status StockAI
+   ```
+

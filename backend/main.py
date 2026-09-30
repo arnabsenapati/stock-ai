@@ -65,6 +65,17 @@ class ScreenerRequest(BaseModel):
     signal_filter: str = "ALL"
 
 # Routes
+@app.get("/")
+def root():
+    return {
+        "app": "AmiBroker-Class Indian EOD Stock Terminal",
+        "status": "online",
+        "market": "NSE / BSE India",
+        "docs_url": "http://127.0.0.1:8000/docs",
+        "health_url": "http://127.0.0.1:8000/api/health",
+        "timestamp": datetime.now().isoformat()
+    }
+
 @app.get("/api/health")
 def health_check():
     return {
@@ -154,8 +165,11 @@ def get_chart_data(
     macd_signal_series = []
     macd_hist_series = []
 
+    # Ensure date is strictly formatted as 'YYYY-MM-DD' for Lightweight Charts
+    transformed['clean_date'] = pd.to_datetime(transformed['date']).dt.strftime('%Y-%m-%d')
+
     for _, row in transformed.iterrows():
-        t = str(row['date'])
+        t = str(row['clean_date'])
         o = float(row['open'])
         h = float(row['high'])
         l = float(row['low'])
@@ -211,8 +225,9 @@ def get_chart_data(
     sma100_ser = enriched.get('sma_100')
     close_ser = enriched.get('close')
     if st_trend is not None and sma100_ser is not None and close_ser is not None:
+        enriched_dates = pd.to_datetime(enriched['date']).dt.strftime('%Y-%m-%d').values
         for i in range(1, len(enriched)):
-            t_str = str(enriched['date'].iloc[i])
+            t_str = str(enriched_dates[i])
             if st_trend.iloc[i] == 1 and st_trend.iloc[i-1] == -1 and close_ser.iloc[i] > sma100_ser.iloc[i]:
                 strategy_signals.append({
                     "time": t_str,

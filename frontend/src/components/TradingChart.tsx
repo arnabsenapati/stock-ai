@@ -21,6 +21,28 @@ interface TradingChartProps {
   onChartTypeChange: (type: 'candlestick' | 'heikin_ashi' | 'renko' | 'line') => void;
 }
 
+function formatDate(time: any): string {
+  if (!time) return '';
+  if (typeof time === 'string') {
+    return time.split(' ')[0].split('T')[0];
+  }
+  if (time && typeof time === 'object' && 'year' in time) {
+    const y = time.year;
+    const m = String(time.month).padStart(2, '0');
+    const d = String(time.day).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  return String(time);
+}
+
+function cleanSeriesData<T extends { time: any }>(items?: T[]): T[] {
+  if (!items || !Array.isArray(items)) return [];
+  return items.map(item => ({
+    ...item,
+    time: formatDate(item.time)
+  }));
+}
+
 export default function TradingChart({ 
   data, 
   loading, 
@@ -99,7 +121,7 @@ export default function TradingChart({
     });
 
     const candleData = data.candles.map(c => ({
-      time: c.time,
+      time: formatDate(c.time),
       open: c.open,
       high: c.high,
       low: c.low,
@@ -115,45 +137,45 @@ export default function TradingChart({
     mainChart.priceScale('volume_scale').applyOptions({
       scaleMargins: { top: 0.8, bottom: 0 }
     });
-    volumeSeries.setData(data.volume);
+    volumeSeries.setData(cleanSeriesData(data.volume));
 
     // Add Overlays
     if (activeOverlays.ema9 && data.indicators.ema_9.length > 0) {
       const s = mainChart.addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1, title: 'EMA 9' });
-      s.setData(data.indicators.ema_9);
+      s.setData(cleanSeriesData(data.indicators.ema_9));
     }
     if (activeOverlays.ema21 && data.indicators.ema_21.length > 0) {
       const s = mainChart.addSeries(LineSeries, { color: '#fb923c', lineWidth: 1, title: 'EMA 21' });
-      s.setData(data.indicators.ema_21);
+      s.setData(cleanSeriesData(data.indicators.ema_21));
     }
     if (activeOverlays.ema50 && data.indicators.ema_50.length > 0) {
       const s = mainChart.addSeries(LineSeries, { color: '#818cf8', lineWidth: 2, title: 'EMA 50' });
-      s.setData(data.indicators.ema_50);
+      s.setData(cleanSeriesData(data.indicators.ema_50));
     }
     if (activeOverlays.ema200 && data.indicators.ema_200.length > 0) {
       const s = mainChart.addSeries(LineSeries, { color: '#e879f9', lineWidth: 2, title: 'EMA 200' });
-      s.setData(data.indicators.ema_200);
+      s.setData(cleanSeriesData(data.indicators.ema_200));
     }
     if (activeOverlays.bollinger && data.indicators.bb_upper.length > 0) {
       const u = mainChart.addSeries(LineSeries, { color: 'rgba(148, 163, 184, 0.6)', lineWidth: 1, title: 'BB Upper' });
       const l = mainChart.addSeries(LineSeries, { color: 'rgba(148, 163, 184, 0.6)', lineWidth: 1, title: 'BB Lower' });
-      u.setData(data.indicators.bb_upper);
-      l.setData(data.indicators.bb_lower);
+      u.setData(cleanSeriesData(data.indicators.bb_upper));
+      l.setData(cleanSeriesData(data.indicators.bb_lower));
     }
     if (activeOverlays.supertrend && data.indicators.supertrend.length > 0) {
       const stSeries = mainChart.addSeries(LineSeries, { color: '#10b981', lineWidth: 2, title: 'SuperTrend' });
-      stSeries.setData(data.indicators.supertrend.map(p => ({
+      stSeries.setData(cleanSeriesData(data.indicators.supertrend.map(p => ({
         time: p.time,
         value: p.value
-      })));
+      }))));
     }
     if (activeOverlays.sma100 && data.indicators.sma_100 && data.indicators.sma_100.length > 0) {
       const s = mainChart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 2, title: 'SMA 100' });
-      s.setData(data.indicators.sma_100);
+      s.setData(cleanSeriesData(data.indicators.sma_100));
     }
     if (activeOverlays.strategySignals && data.strategy_signals && data.strategy_signals.length > 0) {
       try {
-        createSeriesMarkers(candleSeries, data.strategy_signals as any);
+        createSeriesMarkers(candleSeries, cleanSeriesData(data.strategy_signals as any) as any);
       } catch (e) {
         console.error('Error creating strategy markers:', e);
       }
@@ -185,21 +207,21 @@ export default function TradingChart({
 
       if (activeOscillator === 'rsi' && data.indicators.rsi.length > 0) {
         const rsiSeries = oscChart.addSeries(LineSeries, { color: '#a78bfa', lineWidth: 2, title: 'RSI(14)' });
-        rsiSeries.setData(data.indicators.rsi);
+        rsiSeries.setData(cleanSeriesData(data.indicators.rsi));
 
         // Add 70 & 30 reference lines
         const upper = oscChart.addSeries(LineSeries, { color: 'rgba(239, 68, 68, 0.5)', lineWidth: 1, lineStyle: 2 });
         const lower = oscChart.addSeries(LineSeries, { color: 'rgba(34, 197, 94, 0.5)', lineWidth: 1, lineStyle: 2 });
-        upper.setData(data.candles.map(c => ({ time: c.time, value: 70 })));
-        lower.setData(data.candles.map(c => ({ time: c.time, value: 30 })));
+        upper.setData(data.candles.map(c => ({ time: formatDate(c.time), value: 70 })));
+        lower.setData(data.candles.map(c => ({ time: formatDate(c.time), value: 30 })));
       } else if (activeOscillator === 'macd' && data.indicators.macd.length > 0) {
         const macdSeries = oscChart.addSeries(LineSeries, { color: '#38bdf8', lineWidth: 1, title: 'MACD' });
         const sigSeries = oscChart.addSeries(LineSeries, { color: '#f43f5e', lineWidth: 1, title: 'Signal' });
         const histSeries = oscChart.addSeries(HistogramSeries, { title: 'Histogram' });
 
-        macdSeries.setData(data.indicators.macd);
-        sigSeries.setData(data.indicators.macd_signal);
-        histSeries.setData(data.indicators.macd_hist);
+        macdSeries.setData(cleanSeriesData(data.indicators.macd));
+        sigSeries.setData(cleanSeriesData(data.indicators.macd_signal));
+        histSeries.setData(cleanSeriesData(data.indicators.macd_hist));
       }
 
       // Synchronize time scales
@@ -262,7 +284,7 @@ export default function TradingChart({
     low: data.latest.low,
     close: data.latest.close,
     volume: data.latest.volume,
-    date: data.candles[data.candles.length - 1]?.time
+    date: data.candles[data.candles.length - 1]?.time ? formatDate(data.candles[data.candles.length - 1].time) : undefined
   } : {});
 
   const changePct = currentBar.close && currentBar.open 

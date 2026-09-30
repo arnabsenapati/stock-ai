@@ -50,7 +50,7 @@ class ChartTypeConverter:
 
         bricks = []
         prices = df['close'].values
-        dates = df['date'].astype(str).values
+        dates = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d').values
         
         current_brick = prices[0]
         
