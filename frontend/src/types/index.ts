@@ -42,6 +42,7 @@ export interface ChartDataResponse {
     ema_9: IndicatorPoint[];
     ema_21: IndicatorPoint[];
     ema_50: IndicatorPoint[];
+    sma_100?: IndicatorPoint[];
     ema_200: IndicatorPoint[];
     supertrend: IndicatorPoint[];
     bb_upper: IndicatorPoint[];
@@ -51,6 +52,13 @@ export interface ChartDataResponse {
     macd_signal: IndicatorPoint[];
     macd_hist: IndicatorPoint[];
   };
+  strategy_signals?: Array<{
+    time: string;
+    position: 'aboveBar' | 'belowBar';
+    color: string;
+    shape: 'arrowUp' | 'arrowDown';
+    text: string;
+  }>;
   renko_bricks: RenkoBrick[];
 }
 

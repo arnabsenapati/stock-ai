@@ -145,6 +145,32 @@ Sell = Close < LLV(Low, 10).shift(1)
     return true;
   }) || [];
 
+  const handleExportTradesCSV = () => {
+    if (!result || !result.trades.length) return;
+    const headers = ['Symbol', 'Entry Date', 'Exit Date', 'Entry Price', 'Exit Price', 'Qty', 'P&L (Rs)', 'Return %', 'Holding Days', 'Exit Reason'];
+    const rows = result.trades.map(t => [
+      t.symbol,
+      t.entry_date,
+      t.exit_date,
+      t.entry_price,
+      t.exit_price,
+      t.qty,
+      t.pnl,
+      t.return_pct,
+      t.holding_days,
+      `"${t.exit_reason}"`
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `backtest_trades_${mode === 'single' ? selectedStock : selectedUniverse.replace(/\s+/g, '_')}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117] overflow-y-auto p-4 gap-4">
       {/* Top Header & Strategy Config */}
@@ -400,9 +426,18 @@ Sell = Close < LLV(Low, 10).shift(1)
                   : '🕒 Filled at Same Day Close (3:20 PM - MOC Order)'}
               </span>
             </div>
-            <span className="text-[11px] text-zinc-400 font-mono">
-              ₹{result.metrics.initial_capital.toLocaleString()} Initial → ₹{result.metrics.final_equity.toLocaleString()} Equity
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-[11px] text-zinc-400 font-mono">
+                ₹{result.metrics.initial_capital.toLocaleString()} Initial → ₹{result.metrics.final_equity.toLocaleString()} Equity
+              </span>
+              <button
+                onClick={handleExportTradesCSV}
+                className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[11px] font-semibold flex items-center gap-1.5 transition-all border border-zinc-700 shadow-sm"
+                title="Download full trades log in CSV"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-400" /> Export CSV
+              </button>
+            </div>
           </div>
 
           {/* KPI Cards */}

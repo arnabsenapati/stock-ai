@@ -6,12 +6,13 @@ import {
   CandlestickSeries, 
   LineSeries, 
   HistogramSeries,
+  createSeriesMarkers,
   IChartApi,
   ISeriesApi,
   ColorType
 } from 'lightweight-charts';
 import { ChartDataResponse, CandleItem } from '../types';
-import { Eye, EyeOff, Layers, BarChart2, Activity } from 'lucide-react';
+import { Eye, EyeOff, Layers, BarChart2, Activity, Target } from 'lucide-react';
 
 interface TradingChartProps {
   data: ChartDataResponse | null;
@@ -30,12 +31,14 @@ export default function TradingChart({
   const oscContainerRef = useRef<HTMLDivElement>(null);
 
   const [activeOverlays, setActiveOverlays] = useState({
-    ema9: true,
-    ema21: true,
+    ema9: false,
+    ema21: false,
     ema50: false,
+    sma100: true,
     ema200: true,
     supertrend: true,
-    bollinger: false
+    bollinger: false,
+    strategySignals: true
   });
 
   const [activeOscillator, setActiveOscillator] = useState<'rsi' | 'macd' | 'none'>('rsi');
@@ -143,6 +146,17 @@ export default function TradingChart({
         time: p.time,
         value: p.value
       })));
+    }
+    if (activeOverlays.sma100 && data.indicators.sma_100 && data.indicators.sma_100.length > 0) {
+      const s = mainChart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 2, title: 'SMA 100' });
+      s.setData(data.indicators.sma_100);
+    }
+    if (activeOverlays.strategySignals && data.strategy_signals && data.strategy_signals.length > 0) {
+      try {
+        createSeriesMarkers(candleSeries, data.strategy_signals as any);
+      } catch (e) {
+        console.error('Error creating strategy markers:', e);
+      }
     }
 
     // 2. Create Secondary Oscillator Pane (RSI or MACD)
@@ -330,10 +344,23 @@ export default function TradingChart({
               EMA 200
             </button>
             <button 
+              onClick={() => toggleOverlay('sma100')}
+              className={`px-1.5 py-0.5 rounded text-[11px] font-mono transition-colors ${activeOverlays.sma100 ? 'bg-amber-950 text-amber-400 border border-amber-800' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              SMA 100
+            </button>
+            <button 
               onClick={() => toggleOverlay('supertrend')}
               className={`px-1.5 py-0.5 rounded text-[11px] font-mono transition-colors ${activeOverlays.supertrend ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'text-zinc-500 hover:text-zinc-300'}`}
             >
               SuperTrend
+            </button>
+            <button 
+              onClick={() => toggleOverlay('strategySignals')}
+              className={`px-2 py-0.5 rounded text-[11px] font-mono font-semibold flex items-center gap-1 transition-colors ${activeOverlays.strategySignals ? 'bg-emerald-950 text-emerald-300 border border-emerald-600/70 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+              title="Show Buy and Sell signal arrows on chart"
+            >
+              <Target className="w-3 h-3 text-emerald-400" /> Signals
             </button>
             <button 
               onClick={() => toggleOverlay('bollinger')}

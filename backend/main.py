@@ -144,6 +144,7 @@ def get_chart_data(
     ema_9 = []
     ema_21 = []
     ema_50 = []
+    sma_100 = []
     ema_200 = []
     supertrend_series = []
     bb_upper = []
@@ -176,6 +177,8 @@ def get_chart_data(
             ema_21.append({"time": t, "value": round(float(row['ema_21']), 2)})
         if pd.notna(row.get('ema_50')):
             ema_50.append({"time": t, "value": round(float(row['ema_50']), 2)})
+        if pd.notna(row.get('sma_100')):
+            sma_100.append({"time": t, "value": round(float(row['sma_100']), 2)})
         if pd.notna(row.get('ema_200')):
             ema_200.append({"time": t, "value": round(float(row['ema_200']), 2)})
 
@@ -202,6 +205,31 @@ def get_chart_data(
                 "color": "#26a69a" if float(row['macd_hist']) >= 0 else "#ef5350"
             })
 
+    # Generate strategy signal markers: SuperTrend + 100 SMA
+    strategy_signals = []
+    st_trend = enriched.get('supertrend_trend')
+    sma100_ser = enriched.get('sma_100')
+    close_ser = enriched.get('close')
+    if st_trend is not None and sma100_ser is not None and close_ser is not None:
+        for i in range(1, len(enriched)):
+            t_str = str(enriched['date'].iloc[i])
+            if st_trend.iloc[i] == 1 and st_trend.iloc[i-1] == -1 and close_ser.iloc[i] > sma100_ser.iloc[i]:
+                strategy_signals.append({
+                    "time": t_str,
+                    "position": "belowBar",
+                    "color": "#10b981",
+                    "shape": "arrowUp",
+                    "text": "BUY"
+                })
+            elif st_trend.iloc[i] == -1 and st_trend.iloc[i-1] == 1:
+                strategy_signals.append({
+                    "time": t_str,
+                    "position": "aboveBar",
+                    "color": "#ef4444",
+                    "shape": "arrowDown",
+                    "text": "SELL"
+                })
+
     renko_bricks = []
     if chart_type == "renko":
         renko_bricks = chart_converter.to_renko(df)
@@ -225,6 +253,7 @@ def get_chart_data(
             "ema_9": ema_9,
             "ema_21": ema_21,
             "ema_50": ema_50,
+            "sma_100": sma_100,
             "ema_200": ema_200,
             "supertrend": supertrend_series,
             "bb_upper": bb_upper,
@@ -234,6 +263,7 @@ def get_chart_data(
             "macd_signal": macd_signal_series,
             "macd_hist": macd_hist_series
         },
+        "strategy_signals": strategy_signals,
         "renko_bricks": renko_bricks
     }
 

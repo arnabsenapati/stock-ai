@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Filter, Zap, ExternalLink, TrendingUp, TrendingDown, Clock, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Filter, Zap, ExternalLink, TrendingUp, TrendingDown, Clock, ShieldCheck, CheckCircle2, Download } from 'lucide-react';
 import { ScreenerResponse, ScreenerMatch } from '../types';
 
 interface ScreenerViewProps {
@@ -101,6 +101,34 @@ Sell = CrossUnder(Trend, 0)`
     if (signalFilter === 'SELL') return r.signal_type === 'SELL';
     return true;
   }) ?? [];
+
+  const handleExportCSV = () => {
+    if (!filteredResults.length) return;
+    const headers = ['Symbol', 'Signal Type', 'Timing', 'Close Price (Rs)', 'Day Change %', '100 SMA', 'SuperTrend', 'Volume Ratio', 'Delivery %', 'RSI 14', 'Trigger Rationale', 'Date'];
+    const rows = filteredResults.map(r => [
+      r.symbol,
+      r.signal_type,
+      r.signal_timing || '',
+      r.close,
+      r.change_pct,
+      r.sma_100 || '',
+      r.supertrend,
+      r.volume_ratio,
+      r.delivery_pct,
+      r.rsi,
+      `"${r.signal_details.replace(/"/g, '""')}"`,
+      r.date
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `screener_${scanType.replace(/\s+/g, '_')}_${universe.replace(/\s+/g, '_')}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117] overflow-y-auto p-4 gap-4">
@@ -276,6 +304,13 @@ Sell = CrossUnder(Trend, 0)`
                 <span className="w-2 h-2 rounded-full bg-rose-400" />
                 <span className="text-rose-400 font-mono font-semibold">{sellMatchesCount} Sell Triggers</span>
               </div>
+              <button
+                onClick={handleExportCSV}
+                className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[11px] font-semibold flex items-center gap-1.5 transition-all border border-zinc-700 shadow-sm ml-2"
+                title="Download screener matches in CSV format"
+              >
+                <Download className="w-3.5 h-3.5 text-blue-400" /> Export CSV
+              </button>
             </div>
           </div>
 
