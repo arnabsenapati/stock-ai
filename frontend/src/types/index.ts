@@ -73,6 +73,8 @@ export interface BacktestMetrics {
   sortino_ratio: number;
   calmar_ratio: number;
   total_trades: number;
+  total_traded_value?: number;
+  total_turnover?: number;
   winning_trades: number;
   losing_trades: number;
   win_rate_pct: number;
@@ -90,6 +92,9 @@ export interface TradeItem {
   entry_price: number;
   exit_price: number;
   qty: number;
+  trade_value?: number;
+  exit_value?: number;
+  turnover?: number;
   pnl: number;
   return_pct: number;
   holding_days: number;

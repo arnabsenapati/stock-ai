@@ -150,6 +150,10 @@ class BacktestEngine:
                     cash += net_revenue
                     
                     holding_days = (current_date - pos['entry_date']).days
+                    trade_val = round(float(pos['entry_price'] * pos['qty']), 2)
+                    exit_val = round(float(eff_exit_price * pos['qty']), 2)
+                    turnover = round(float(trade_val + exit_val), 2)
+
                     trades_log.append({
                         "symbol": sym,
                         "entry_date": str(pos['entry_date']),
@@ -157,6 +161,9 @@ class BacktestEngine:
                         "entry_price": round(float(pos['entry_price']), 2),
                         "exit_price": round(float(eff_exit_price), 2),
                         "qty": int(pos['qty']),
+                        "trade_value": trade_val,
+                        "exit_value": exit_val,
+                        "turnover": turnover,
                         "pnl": round(float(pnl), 2),
                         "return_pct": round(float(pnl_pct), 2),
                         "holding_days": int(holding_days),
@@ -277,6 +284,8 @@ class BacktestEngine:
         avg_win_pct = float(np.mean([t['return_pct'] for t in wins])) if wins else 0.0
         avg_loss_pct = float(np.mean([t['return_pct'] for t in losses])) if losses else 0.0
         avg_holding_days = float(np.mean([t['holding_days'] for t in trades])) if trades else 0.0
+        total_trade_value = sum(t.get('trade_value', t['entry_price'] * t['qty']) for t in trades)
+        total_turnover = sum(t.get('turnover', (t['entry_price'] + t['exit_price']) * t['qty']) for t in trades)
 
         return {
             "initial_capital": round(float(initial_val), 2),
@@ -289,6 +298,8 @@ class BacktestEngine:
             "sortino_ratio": round(float(sortino), 2),
             "calmar_ratio": round(float(calmar), 2),
             "total_trades": int(total_trades),
+            "total_traded_value": round(float(total_trade_value), 2),
+            "total_turnover": round(float(total_turnover), 2),
             "winning_trades": int(len(wins)),
             "losing_trades": int(len(losses)),
             "win_rate_pct": round(float(win_rate), 2),

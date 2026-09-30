@@ -145,9 +145,12 @@ Sell = Close < LLV(Low, 10).shift(1)
     return true;
   }) || [];
 
+  const totalFilteredTradeValue = filteredTrades.reduce((sum, t) => sum + (t.trade_value ?? (t.entry_price * t.qty)), 0);
+  const totalFilteredTurnover = filteredTrades.reduce((sum, t) => sum + (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)), 0);
+
   const handleExportTradesCSV = () => {
     if (!result || !result.trades.length) return;
-    const headers = ['Symbol', 'Entry Date', 'Exit Date', 'Entry Price', 'Exit Price', 'Qty', 'P&L (Rs)', 'Return %', 'Holding Days', 'Exit Reason'];
+    const headers = ['Symbol', 'Entry Date', 'Exit Date', 'Entry Price', 'Exit Price', 'Qty', 'Traded Value (Rs)', 'Turnover (Rs)', 'P&L (Rs)', 'Return %', 'Holding Days', 'Exit Reason'];
     const rows = result.trades.map(t => [
       t.symbol,
       t.entry_date,
@@ -155,6 +158,8 @@ Sell = Close < LLV(Low, 10).shift(1)
       t.entry_price,
       t.exit_price,
       t.qty,
+      (t.trade_value ?? (t.entry_price * t.qty)).toFixed(2),
+      (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)).toFixed(2),
       t.pnl,
       t.return_pct,
       t.holding_days,
@@ -441,7 +446,7 @@ Sell = Close < LLV(Low, 10).shift(1)
           </div>
 
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-3">
             <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
               <span className="text-[10px] text-zinc-400 block uppercase">Net Profit</span>
               <span className={`text-base font-bold font-mono ${result.metrics.net_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -490,6 +495,16 @@ Sell = Close < LLV(Low, 10).shift(1)
                 {result.metrics.total_trades}
               </span>
               <span className="text-[10px] text-zinc-500 block">Completed</span>
+            </div>
+
+            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+              <span className="text-[10px] text-zinc-400 block uppercase">Total Traded</span>
+              <span className="text-base font-bold font-mono text-blue-400">
+                ₹{(result.metrics.total_traded_value ?? result.trades.reduce((s, t) => s + (t.trade_value ?? (t.entry_price * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </span>
+              <span className="text-[10px] text-zinc-500 block truncate" title={`Turnover: ₹${(result.metrics.total_turnover ?? result.trades.reduce((s, t) => s + (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}>
+                Turnover: ₹{(result.metrics.total_turnover ?? result.trades.reduce((s, t) => s + (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              </span>
             </div>
 
             <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
@@ -556,7 +571,7 @@ Sell = Close < LLV(Low, 10).shift(1)
               <div className="flex items-center gap-2">
                 <Award className="w-4 h-4 text-emerald-400" />
                 <span className="text-xs font-semibold text-white uppercase tracking-wider">
-                  Detailed Trade Execution Log ({filteredTrades.length} Trades)
+                  Detailed Trade Execution Log ({filteredTrades.length} Trades • Total Traded Value: ₹{totalFilteredTradeValue.toLocaleString(undefined, { maximumFractionDigits: 0 })})
                 </span>
               </div>
 
@@ -584,6 +599,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                     <th className="p-2.5">Entry (₹)</th>
                     <th className="p-2.5">Exit (₹)</th>
                     <th className="p-2.5">Qty</th>
+                    <th className="p-2.5">Traded Value (₹)</th>
                     <th className="p-2.5">PnL (₹)</th>
                     <th className="p-2.5">Return %</th>
                     <th className="p-2.5">Hold Days</th>
@@ -599,6 +615,10 @@ Sell = Close < LLV(Low, 10).shift(1)
                       <td className="p-2.5">₹{t.entry_price.toFixed(2)}</td>
                       <td className="p-2.5">₹{t.exit_price.toFixed(2)}</td>
                       <td className="p-2.5">{t.qty}</td>
+                      <td className="p-2.5 font-mono text-zinc-200">
+                        <div>₹{(t.trade_value ?? (t.entry_price * t.qty)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div className="text-[10px] text-zinc-500">Turnover: ₹{(t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                      </td>
                       <td className={`p-2.5 font-semibold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {t.pnl >= 0 ? '+' : ''}₹{t.pnl.toFixed(2)}
                       </td>
@@ -611,7 +631,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                   ))}
                   {filteredTrades.length === 0 && (
                     <tr>
-                      <td colSpan={10} className="p-6 text-center text-zinc-500 font-sans">
+                      <td colSpan={11} className="p-6 text-center text-zinc-500 font-sans">
                         No completed trades recorded for this strategy configuration.
                       </td>
                     </tr>
