@@ -86,7 +86,10 @@ Sell = CrossUnder(Trend, 0)
     risk_min: 5.0,
     risk_max: 25.0,
     pos_min: 4,
-    pos_max: 12
+    pos_max: 12,
+    ts_mode: 'auto' as 'auto' | 'always_on' | 'disabled',
+    ts_min: 2.0,
+    ts_max: 10.0
   });
 
   const presets: Record<string, string> = {
@@ -166,7 +169,7 @@ Sell = Close < LLV(Low, 10).shift(1)
     if (showOptModal || optStatus?.status === 'running') {
       const pollStatus = async () => {
         try {
-          const res = await fetch('http://localhost:8000/api/optimize/status');
+          const res = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
           if (res.ok) {
             const data: OptimizationStatusResponse = await res.json();
             setOptStatus(data);
@@ -181,7 +184,7 @@ Sell = Close < LLV(Low, 10).shift(1)
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [showOptModal, optStatus?.status]);
+  }, [showOptModal, optStatus?.status, selectedPresetName, selectedUniverse]);
 
   const handleStartOpt = async () => {
     setOptLoading(true);
@@ -211,7 +214,7 @@ Sell = Close < LLV(Low, 10).shift(1)
         const errData = await res.json();
         throw new Error(errData.detail || 'Failed to start optimization');
       }
-      const statusRes = await fetch('http://localhost:8000/api/optimize/status');
+      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
       if (statusRes.ok) {
         setOptStatus(await statusRes.json());
       }
@@ -225,7 +228,7 @@ Sell = Close < LLV(Low, 10).shift(1)
   const handlePauseOpt = async () => {
     try {
       await fetch('http://localhost:8000/api/optimize/pause', { method: 'POST' });
-      const statusRes = await fetch('http://localhost:8000/api/optimize/status');
+      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
       if (statusRes.ok) {
         setOptStatus(await statusRes.json());
       }
@@ -236,8 +239,17 @@ Sell = Close < LLV(Low, 10).shift(1)
 
   const handleResumeOpt = async () => {
     try {
-      await fetch('http://localhost:8000/api/optimize/resume', { method: 'POST' });
-      const statusRes = await fetch('http://localhost:8000/api/optimize/status');
+      await fetch('http://localhost:8000/api/optimize/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_name: selectedPresetName,
+          universe: selectedUniverse,
+          strategy_code: strategyCode,
+          execution_timing: executionTiming
+        })
+      });
+      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
       if (statusRes.ok) {
         setOptStatus(await statusRes.json());
       }
@@ -1006,8 +1018,11 @@ Sell = Close < LLV(Low, 10).shift(1)
 
               {/* Parameter Boundaries Grid */}
               <div className="bg-[#0d1117]/60 p-3 rounded-xl border border-zinc-800 space-y-2">
-                <span className="text-[11px] font-semibold text-zinc-300 block">Parameter Search Boundaries</span>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-zinc-300 block">Parameter Search Boundaries</span>
+                  <span className="text-[10px] text-zinc-500">Fine-tune bounds before starting</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
                   <div className="p-2 rounded-lg bg-[#161b22] border border-zinc-800">
                     <span className="text-zinc-400 text-[10px] block">Stop Loss % Range</span>
                     <div className="flex items-center gap-1 mt-1 font-mono text-zinc-200">
@@ -1016,7 +1031,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.sl_min} 
                         onChange={e => setOptRanges({...optRanges, sl_min: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                       <span>-</span>
                       <input 
@@ -1024,7 +1039,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.sl_max} 
                         onChange={e => setOptRanges({...optRanges, sl_max: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                       <span>%</span>
                     </div>
@@ -1038,7 +1053,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.tp_min} 
                         onChange={e => setOptRanges({...optRanges, tp_min: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                       <span>-</span>
                       <input 
@@ -1046,10 +1061,51 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.tp_max} 
                         onChange={e => setOptRanges({...optRanges, tp_max: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                       <span>%</span>
                     </div>
+                  </div>
+
+                  {/* Trailing Stop Range & Mode Card */}
+                  <div className="p-2 rounded-lg bg-[#161b22] border border-purple-900/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-purple-300 text-[10px] font-semibold block">Trailing Stop</span>
+                      <select
+                        value={optRanges.ts_mode}
+                        onChange={e => setOptRanges({...optRanges, ts_mode: e.target.value as any})}
+                        disabled={optStatus?.status === 'running'}
+                        className="bg-[#0d1117] text-[10px] text-zinc-300 border border-zinc-800 rounded px-1 py-0.5"
+                      >
+                        <option value="auto">Auto (AI)</option>
+                        <option value="always_on">Always On</option>
+                        <option value="disabled">Disabled</option>
+                      </select>
+                    </div>
+                    {optRanges.ts_mode !== 'disabled' ? (
+                      <div className="flex items-center gap-1 mt-1 font-mono text-zinc-200">
+                        <input 
+                          type="number" 
+                          value={optRanges.ts_min} 
+                          onChange={e => setOptRanges({...optRanges, ts_min: Number(e.target.value)})}
+                          disabled={optStatus?.status === 'running'}
+                          className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
+                        />
+                        <span>-</span>
+                        <input 
+                          type="number" 
+                          value={optRanges.ts_max} 
+                          onChange={e => setOptRanges({...optRanges, ts_max: Number(e.target.value)})}
+                          disabled={optStatus?.status === 'running'}
+                          className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
+                        />
+                        <span>%</span>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-zinc-500 mt-1 italic">
+                        Trailing stop omitted
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-2 rounded-lg bg-[#161b22] border border-zinc-800">
@@ -1060,7 +1116,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.risk_min} 
                         onChange={e => setOptRanges({...optRanges, risk_min: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                       <span>-</span>
                       <input 
@@ -1068,7 +1124,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.risk_max} 
                         onChange={e => setOptRanges({...optRanges, risk_max: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                       <span>%</span>
                     </div>
@@ -1082,7 +1138,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.pos_min} 
                         onChange={e => setOptRanges({...optRanges, pos_min: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                       <span>-</span>
                       <input 
@@ -1090,7 +1146,7 @@ Sell = Close < LLV(Low, 10).shift(1)
                         value={optRanges.pos_max} 
                         onChange={e => setOptRanges({...optRanges, pos_max: Number(e.target.value)})}
                         disabled={optStatus?.status === 'running'}
-                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                        className="w-10 bg-[#0d1117] border border-zinc-700 rounded px-1 py-0.5 text-center text-xs" 
                       />
                     </div>
                   </div>

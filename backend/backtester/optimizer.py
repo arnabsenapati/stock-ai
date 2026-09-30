@@ -59,9 +59,79 @@ class OptunaStrategyOptimizer:
         db_path = OPTUNA_DB_PATH.as_posix()
         return f"sqlite:///{db_path}"
 
-    def get_status(self) -> Dict[str, Any]:
-        """Returns the live state of the optimization engine"""
+    def get_status(self, strategy_name: Optional[str] = None, universe: Optional[str] = None) -> Dict[str, Any]:
+        """Returns the live or persisted state of the optimization engine"""
         with self._lock:
+            # If actively running, report live status
+            if self.status == "running":
+                study_name = self.get_study_name(self.strategy_name, self.universe) if self.strategy_name else ""
+                return {
+                    "status": self.status,
+                    "strategy_name": self.strategy_name,
+                    "universe": self.universe,
+                    "study_name": study_name,
+                    "target_metric": self.target_metric,
+                    "target_trials": self.target_trials,
+                    "completed_trials": self.completed_trials,
+                    "progress_pct": round((self.completed_trials / max(1, self.target_trials)) * 100, 1),
+                    "best_value": round(self.best_value, 2) if self.best_value is not None else None,
+                    "best_params": self.best_params,
+                    "best_metrics": self.best_metrics,
+                    "recent_trials": self.recent_trials[-15:],
+                    "error_message": self.error_message,
+                    "started_at": self.started_at,
+                    "last_updated_at": self.last_updated_at
+                }
+
+            # Check if there is a saved study in SQLite for the specified strategy & universe
+            target_strat = strategy_name or self.strategy_name
+            target_univ = universe or self.universe
+            if target_strat and target_univ:
+                study_name = self.get_study_name(target_strat, target_univ)
+                storage_url = self.get_storage_url()
+                try:
+                    study = optuna.load_study(study_name=study_name, storage=storage_url)
+                    n_trials = len(study.trials)
+                    if n_trials > 0:
+                        self.strategy_name = target_strat
+                        self.universe = target_univ
+                        self.completed_trials = n_trials
+                        if study.best_trial:
+                            self.best_value = study.best_value
+                            self.best_params = study.best_params
+                            self.best_metrics = study.best_trial.user_attrs
+
+                        recent = []
+                        for t in study.trials[-15:]:
+                            recent.append({
+                                "trial_number": t.number + 1,
+                                "value": round(t.value or 0.0, 2),
+                                "params": t.params,
+                                "metrics": t.user_attrs
+                            })
+                        self.recent_trials = recent
+
+                        effective_target = max(self.target_trials, n_trials)
+                        return {
+                            "status": "completed" if (self.status == "completed" and n_trials >= self.target_trials) else "paused",
+                            "strategy_name": target_strat,
+                            "universe": target_univ,
+                            "study_name": study_name,
+                            "target_metric": self.target_metric,
+                            "target_trials": effective_target,
+                            "completed_trials": n_trials,
+                            "progress_pct": round((n_trials / max(1, effective_target)) * 100, 1),
+                            "best_value": round(self.best_value, 2) if self.best_value is not None else None,
+                            "best_params": self.best_params,
+                            "best_metrics": self.best_metrics,
+                            "recent_trials": recent,
+                            "error_message": None,
+                            "started_at": self.started_at,
+                            "last_updated_at": self.last_updated_at
+                        }
+                except Exception:
+                    pass
+
             study_name = self.get_study_name(self.strategy_name, self.universe) if self.strategy_name else ""
             return {
                 "status": self.status,
@@ -75,7 +145,7 @@ class OptunaStrategyOptimizer:
                 "best_value": round(self.best_value, 2) if self.best_value is not None else None,
                 "best_params": self.best_params,
                 "best_metrics": self.best_metrics,
-                "recent_trials": self.recent_trials[-10:],
+                "recent_trials": self.recent_trials[-15:],
                 "error_message": self.error_message,
                 "started_at": self.started_at,
                 "last_updated_at": self.last_updated_at
@@ -173,23 +243,36 @@ class OptunaStrategyOptimizer:
             self._pause_requested = True
             return {"message": "Pause requested. Optimization will pause after the current trial commits."}
 
-    def resume_optimization(self):
-        """Resumes a paused optimization task"""
-        with self._lock:
-            if self.status != "paused":
-                raise RuntimeError(f"Cannot resume optimization in state: {self.status}. Must be 'paused'.")
+    def resume_optimization(self, strategy_name: Optional[str] = None, universe: Optional[str] = None,
+                            strategy_code: Optional[str] = None, execution_timing: str = "next_open"):
+        """Resumes a paused optimization task, reloading data cache if necessary"""
+        target_strat = strategy_name or self.strategy_name
+        target_univ = universe or self.universe
+        target_code = strategy_code or self.strategy_code
+        if not target_strat or not target_univ:
+            raise RuntimeError("Strategy and Universe must be specified to resume optimization.")
 
+        # Ensure signal cache is populated
+        if not self._symbol_data_cache:
+            if not target_code:
+                raise RuntimeError("Strategy formula code is required to compute stock signals.")
+            self._symbol_data_cache = self.prepare_data(target_univ, target_code, execution_timing)
+
+        with self._lock:
+            self.strategy_name = target_strat
+            self.universe = target_univ
+            self.strategy_code = target_code
             self._pause_requested = False
             self._stop_requested = False
             self.status = "running"
 
         self._thread = threading.Thread(
             target=self._run_optimization_loop,
-            args=(self.strategy_name, self.universe, 100000.0, "next_open", {}),
+            args=(self.strategy_name, self.universe, 100000.0, execution_timing, {}),
             daemon=True
         )
         self._thread.start()
-        return {"message": "Optimization resumed."}
+        return {"message": f"Optimization resumed for {self.strategy_name} on {self.universe}."}
 
     def _run_optimization_loop(self,
                                strategy_name: str,
@@ -213,6 +296,8 @@ class OptunaStrategyOptimizer:
         # Sync completed trials from persistent study
         with self._lock:
             self.completed_trials = len(study.trials)
+            if self.target_trials <= self.completed_trials:
+                self.target_trials = self.completed_trials + 100
             if len(study.trials) > 0 and study.best_trial is not None:
                 self.best_value = study.best_value
                 self.best_params = study.best_params
@@ -235,11 +320,20 @@ class OptunaStrategyOptimizer:
             risk_per_trade = trial.suggest_float("risk_per_trade_pct", risk_min, risk_max, step=2.5)
             max_positions = trial.suggest_int("max_positions", pos_min, pos_max, step=1)
             
-            # Optional trailing stop toggle
-            enable_ts = trial.suggest_categorical("enable_trailing_stop", [True, False])
+            # Trailing stop configuration
+            ts_mode = ranges.get('ts_mode', 'auto')
+            ts_min = float(ranges.get('ts_min', 2.0))
+            ts_max = float(ranges.get('ts_max', 10.0))
             trailing_stop = None
-            if enable_ts:
-                trailing_stop = trial.suggest_float("trailing_stop_pct", 2.0, 10.0, step=0.5)
+            if ts_mode == 'disabled':
+                enable_ts = False
+            elif ts_mode == 'always_on':
+                enable_ts = True
+                trailing_stop = trial.suggest_float("trailing_stop_pct", ts_min, ts_max, step=0.5)
+            else: # 'auto'
+                enable_ts = trial.suggest_categorical("enable_trailing_stop", [True, False])
+                if enable_ts:
+                    trailing_stop = trial.suggest_float("trailing_stop_pct", ts_min, ts_max, step=0.5)
 
             # Construct engine with trial parameters
             engine = BacktestEngine(

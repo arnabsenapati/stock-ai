@@ -414,18 +414,29 @@ def pause_optimization():
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/api/optimize/resume")
-def resume_optimization():
+def resume_optimization(req: Optional[OptimizeStartRequest] = None):
     """Resume optimization from SQLite checkpoint"""
     try:
-        res = strategy_optimizer.resume_optimization()
+        if req:
+            res = strategy_optimizer.resume_optimization(
+                strategy_name=req.strategy_name,
+                universe=req.universe,
+                strategy_code=req.strategy_code,
+                execution_timing=req.execution_timing
+            )
+        else:
+            res = strategy_optimizer.resume_optimization()
         return res
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/api/optimize/status")
-def get_optimization_status():
+def get_optimization_status(
+    strategy_name: Optional[str] = Query(None),
+    universe: Optional[str] = Query(None)
+):
     """Live status, trial progress, and current best parameters"""
-    return strategy_optimizer.get_status()
+    return strategy_optimizer.get_status(strategy_name, universe)
 
 @app.post("/api/optimize/reset")
 def reset_optimization(req: OptimizeActionRequest):
