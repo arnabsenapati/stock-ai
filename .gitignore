@@ -36,7 +36,9 @@ yarn-error.log*
 # Database & Local Data Cache
 *.duckdb
 *.duckdb.wal
+*.db
 data_lake/*.duckdb
+data_lake/*.db
 data_lake/bhavcopy/*.zip
 
 # OS Files

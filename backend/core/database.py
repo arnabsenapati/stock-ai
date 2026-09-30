@@ -28,6 +28,27 @@ class DatabaseManager:
                     PRIMARY KEY (symbol, date)
                 );
                 CREATE INDEX IF NOT EXISTS idx_eod_symbol_date ON eod_prices(symbol, date);
+
+                CREATE TABLE IF NOT EXISTS strategy_basket_profiles (
+                    strategy_name VARCHAR,
+                    universe VARCHAR,
+                    initial_capital DOUBLE,
+                    risk_per_trade_pct DOUBLE,
+                    stop_loss_pct DOUBLE,
+                    take_profit_pct DOUBLE,
+                    trailing_stop_pct DOUBLE,
+                    max_positions INT,
+                    best_metric_name VARCHAR,
+                    best_metric_value DOUBLE,
+                    total_trades INT,
+                    win_rate DOUBLE,
+                    total_return_pct DOUBLE,
+                    max_drawdown_pct DOUBLE,
+                    sharpe_ratio DOUBLE,
+                    cagr_pct DOUBLE,
+                    updated_at TIMESTAMP,
+                    PRIMARY KEY (strategy_name, universe)
+                );
             """)
 
     def save_symbol_data(self, symbol: str, df: pd.DataFrame, source: str = "yfinance"):
@@ -141,5 +162,105 @@ class DatabaseManager:
                 "min_date": str(res[2]) if res[2] else None,
                 "max_date": str(res[3]) if res[3] else None
             }
+
+    def save_strategy_basket_profile(self, profile: Dict[str, Any]):
+        """Upsert an optimized strategy-basket parameter preset"""
+        with self.get_connection() as con:
+            con.execute("""
+                INSERT OR REPLACE INTO strategy_basket_profiles (
+                    strategy_name, universe, initial_capital, risk_per_trade_pct,
+                    stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
+                    best_metric_name, best_metric_value, total_trades, win_rate,
+                    total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, [
+                profile.get("strategy_name"),
+                profile.get("universe"),
+                float(profile.get("initial_capital", 100000.0)),
+                float(profile.get("risk_per_trade_pct", 10.0)),
+                float(profile["stop_loss_pct"]) if profile.get("stop_loss_pct") is not None else None,
+                float(profile["take_profit_pct"]) if profile.get("take_profit_pct") is not None else None,
+                float(profile["trailing_stop_pct"]) if profile.get("trailing_stop_pct") is not None else None,
+                int(profile.get("max_positions", 10)),
+                profile.get("best_metric_name", "sharpe_ratio"),
+                float(profile.get("best_metric_value", 0.0)),
+                int(profile.get("total_trades", 0)),
+                float(profile.get("win_rate", 0.0)),
+                float(profile.get("total_return_pct", 0.0)),
+                float(profile.get("max_drawdown_pct", 0.0)),
+                float(profile.get("sharpe_ratio", 0.0)),
+                float(profile.get("cagr_pct", 0.0))
+            ])
+
+    def get_strategy_basket_profile(self, strategy_name: str, universe: str) -> Optional[Dict[str, Any]]:
+        """Retrieve optimized preset for strategy + basket pair"""
+        with self.get_connection() as con:
+            res = con.execute("""
+                SELECT 
+                    strategy_name, universe, initial_capital, risk_per_trade_pct,
+                    stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
+                    best_metric_name, best_metric_value, total_trades, win_rate,
+                    total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct,
+                    strftime(updated_at, '%Y-%m-%d %H:%M:%S') as updated_at
+                FROM strategy_basket_profiles
+                WHERE strategy_name = ? AND universe = ?
+            """, [strategy_name, universe]).fetchone()
+            
+            if not res:
+                return None
+            
+            return {
+                "strategy_name": res[0],
+                "universe": res[1],
+                "initial_capital": res[2],
+                "risk_per_trade_pct": res[3],
+                "stop_loss_pct": res[4],
+                "take_profit_pct": res[5],
+                "trailing_stop_pct": res[6],
+                "max_positions": res[7],
+                "best_metric_name": res[8],
+                "best_metric_value": res[9],
+                "total_trades": res[10],
+                "win_rate": res[11],
+                "total_return_pct": res[12],
+                "max_drawdown_pct": res[13],
+                "sharpe_ratio": res[14],
+                "cagr_pct": res[15],
+                "updated_at": res[16]
+            }
+
+    def list_strategy_basket_profiles(self) -> List[Dict[str, Any]]:
+        """List all saved strategy-basket presets"""
+        with self.get_connection() as con:
+            rows = con.execute("""
+                SELECT 
+                    strategy_name, universe, initial_capital, risk_per_trade_pct,
+                    stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
+                    best_metric_name, best_metric_value, total_trades, win_rate,
+                    total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct,
+                    strftime(updated_at, '%Y-%m-%d %H:%M:%S') as updated_at
+                FROM strategy_basket_profiles
+                ORDER BY updated_at DESC
+            """).fetchall()
+
+            return [{
+                "strategy_name": r[0],
+                "universe": r[1],
+                "initial_capital": r[2],
+                "risk_per_trade_pct": r[3],
+                "stop_loss_pct": r[4],
+                "take_profit_pct": r[5],
+                "trailing_stop_pct": r[6],
+                "max_positions": r[7],
+                "best_metric_name": r[8],
+                "best_metric_value": r[9],
+                "total_trades": r[10],
+                "win_rate": r[11],
+                "total_return_pct": r[12],
+                "max_drawdown_pct": r[13],
+                "sharpe_ratio": r[14],
+                "cagr_pct": r[15],
+                "updated_at": r[16]
+            } for r in rows]
 
 db = DatabaseManager()

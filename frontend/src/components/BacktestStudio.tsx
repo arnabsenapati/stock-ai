@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Play, 
   RotateCcw, 
@@ -15,9 +15,19 @@ import {
   Code2,
   Sliders,
   DollarSign,
-  Clock
+  Clock,
+  Sparkles,
+  Pause,
+  CheckCircle2,
+  Save,
+  Cpu,
+  RefreshCw,
+  X,
+  Zap,
+  Layers,
+  ChevronRight
 } from 'lucide-react';
-import { BacktestResponse } from '../types';
+import { BacktestResponse, OptimizationStatusResponse, StrategyBasketProfile } from '../types';
 
 interface BacktestStudioProps {
   currentSymbol: string;
@@ -58,6 +68,27 @@ Sell = CrossUnder(Trend, 0)
   const [error, setError] = useState<string | null>(null);
   const [tradeFilter, setTradeFilter] = useState<'all' | 'wins' | 'losses'>('all');
 
+  const [selectedPresetName, setSelectedPresetName] = useState<string>("SuperTrend + 100 SMA Trend Rider (Optimal)");
+  const [savedProfile, setSavedProfile] = useState<StrategyBasketProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState<boolean>(false);
+  const [showOptModal, setShowOptModal] = useState<boolean>(false);
+
+  // Optimization state
+  const [optStatus, setOptStatus] = useState<OptimizationStatusResponse | null>(null);
+  const [optLoading, setOptLoading] = useState<boolean>(false);
+  const [optMetric, setOptMetric] = useState<string>('sharpe_ratio');
+  const [optTrials, setOptTrials] = useState<number>(150);
+  const [optRanges, setOptRanges] = useState({
+    sl_min: 2.0,
+    sl_max: 15.0,
+    tp_min: 5.0,
+    tp_max: 35.0,
+    risk_min: 5.0,
+    risk_max: 25.0,
+    pos_min: 4,
+    pos_max: 12
+  });
+
   const presets: Record<string, string> = {
     "SuperTrend + 100 SMA Trend Rider (Optimal)": `# SuperTrend + 100 SMA Trend Rider (Optimal)
 MacroTrend = Close > SMA(Close, 100)
@@ -93,6 +124,202 @@ Sell = CrossUnder(Close, EMA(Close, 20))
 Buy = Close > HHV(High, 20).shift(1)
 Sell = Close < LLV(Low, 10).shift(1)
 `
+  };
+
+  // Apply saved profile parameters directly into the input fields
+  const applyProfileToInputs = (p: StrategyBasketProfile) => {
+    if (p.initial_capital) setInitialCapital(p.initial_capital);
+    if (p.risk_per_trade_pct) setRiskPerTrade(p.risk_per_trade_pct);
+    if (p.stop_loss_pct !== null && p.stop_loss_pct !== undefined) setStopLoss(String(p.stop_loss_pct));
+    if (p.take_profit_pct !== null && p.take_profit_pct !== undefined) setTakeProfit(String(p.take_profit_pct));
+    if (p.trailing_stop_pct !== null && p.trailing_stop_pct !== undefined) setTrailingStop(String(p.trailing_stop_pct));
+    else setTrailingStop('');
+    if (p.max_positions) setMaxPositions(p.max_positions);
+  };
+
+  // Fetch preset whenever strategy or universe changes
+  useEffect(() => {
+    const fetchPreset = async () => {
+      setProfileLoading(true);
+      try {
+        const res = await fetch(`http://localhost:8000/api/presets/profile?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.profile) {
+            setSavedProfile(data.profile);
+          } else {
+            setSavedProfile(null);
+          }
+        }
+      } catch (err) {
+        // silent
+      } finally {
+        setProfileLoading(false);
+      }
+    };
+    fetchPreset();
+  }, [selectedPresetName, selectedUniverse]);
+
+  // Status poller when modal is open or when optimizer is running
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (showOptModal || optStatus?.status === 'running') {
+      const pollStatus = async () => {
+        try {
+          const res = await fetch('http://localhost:8000/api/optimize/status');
+          if (res.ok) {
+            const data: OptimizationStatusResponse = await res.json();
+            setOptStatus(data);
+          }
+        } catch (e) {
+          // silent
+        }
+      };
+      pollStatus();
+      interval = setInterval(pollStatus, 1000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [showOptModal, optStatus?.status]);
+
+  const handleStartOpt = async () => {
+    setOptLoading(true);
+    try {
+      let startDate: string | null = null;
+      if (lookbackPeriod === '3y') startDate = '2023-09-28';
+      else if (lookbackPeriod === '2y') startDate = '2024-09-28';
+      else if (lookbackPeriod === '1y') startDate = '2025-09-28';
+
+      const res = await fetch('http://localhost:8000/api/optimize/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_name: selectedPresetName,
+          universe: selectedUniverse,
+          strategy_code: strategyCode,
+          target_trials: optTrials,
+          target_metric: optMetric,
+          initial_capital: initialCapital,
+          execution_timing: executionTiming,
+          param_ranges: optRanges,
+          start_date: startDate
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.detail || 'Failed to start optimization');
+      }
+      const statusRes = await fetch('http://localhost:8000/api/optimize/status');
+      if (statusRes.ok) {
+        setOptStatus(await statusRes.json());
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error starting optimizer');
+    } finally {
+      setOptLoading(false);
+    }
+  };
+
+  const handlePauseOpt = async () => {
+    try {
+      await fetch('http://localhost:8000/api/optimize/pause', { method: 'POST' });
+      const statusRes = await fetch('http://localhost:8000/api/optimize/status');
+      if (statusRes.ok) {
+        setOptStatus(await statusRes.json());
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error pausing optimizer');
+    }
+  };
+
+  const handleResumeOpt = async () => {
+    try {
+      await fetch('http://localhost:8000/api/optimize/resume', { method: 'POST' });
+      const statusRes = await fetch('http://localhost:8000/api/optimize/status');
+      if (statusRes.ok) {
+        setOptStatus(await statusRes.json());
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error resuming optimizer');
+    }
+  };
+
+  const handleResetOpt = async () => {
+    if (!confirm(`Are you sure you want to reset the optimization study for "${selectedPresetName}" on "${selectedUniverse}"? All trial checkpoints will be cleared.`)) return;
+    try {
+      await fetch('http://localhost:8000/api/optimize/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_name: selectedPresetName,
+          universe: selectedUniverse
+        })
+      });
+      setOptStatus(null);
+    } catch (e: any) {
+      alert(e.message || 'Error resetting study');
+    }
+  };
+
+  const handleApplyOpt = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/optimize/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_name: selectedPresetName,
+          universe: selectedUniverse
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to apply profile');
+      }
+      const data = await res.json();
+      if (data.profile) {
+        applyProfileToInputs(data.profile);
+        setSavedProfile(data.profile);
+        setShowOptModal(false);
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error applying best profile');
+    }
+  };
+
+  const handleSaveCurrentAsPreset = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/presets/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_name: selectedPresetName,
+          universe: selectedUniverse,
+          initial_capital: initialCapital,
+          risk_per_trade_pct: riskPerTrade,
+          stop_loss_pct: stopLoss ? parseFloat(stopLoss) : null,
+          take_profit_pct: takeProfit ? parseFloat(takeProfit) : null,
+          trailing_stop_pct: trailingStop ? parseFloat(trailingStop) : null,
+          max_positions: maxPositions,
+          best_metric_name: 'manual',
+          best_metric_value: result?.metrics.sharpe_ratio ?? 0,
+          total_trades: result?.metrics.total_trades ?? 0,
+          win_rate: result?.metrics.win_rate_pct ?? 0,
+          total_return_pct: result?.metrics.total_return_pct ?? 0,
+          max_drawdown_pct: result?.metrics.max_drawdown_pct ?? 0,
+          sharpe_ratio: result?.metrics.sharpe_ratio ?? 0,
+          cagr_pct: result?.metrics.cagr_pct ?? 0
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSavedProfile(data.profile);
+        alert(`Saved preset configuration for "${selectedPresetName}" on "${selectedUniverse}"!`);
+      }
+    } catch (e: any) {
+      alert(e.message || 'Error saving preset');
+    }
   };
 
   const handleRunBacktest = async () => {
@@ -192,7 +419,11 @@ Sell = Close < LLV(Low, 10).shift(1)
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-400">Presets:</span>
               <select
-                onChange={e => setStrategyCode(presets[e.target.value])}
+                value={selectedPresetName}
+                onChange={e => {
+                  setSelectedPresetName(e.target.value);
+                  setStrategyCode(presets[e.target.value]);
+                }}
                 className="bg-[#0d1117] border border-zinc-700 text-xs text-zinc-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-blue-500"
               >
                 {Object.keys(presets).map(name => (
@@ -330,6 +561,27 @@ Sell = Close < LLV(Low, 10).shift(1)
             </div>
           </div>
 
+          {/* Active Preset Ribbon */}
+          {savedProfile && (
+            <div className="flex items-center justify-between p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 text-[11px]">
+              <div className="flex items-center gap-1.5 text-emerald-300">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <div className="truncate">
+                  <span className="font-semibold text-emerald-200">Preset Active: </span>
+                  <span className="font-mono text-emerald-300">SL {savedProfile.stop_loss_pct ?? 'N/A'}% • TP {savedProfile.take_profit_pct ?? 'N/A'}% • Sharpe {savedProfile.sharpe_ratio}</span>
+                </div>
+              </div>
+              <button 
+                onClick={() => applyProfileToInputs(savedProfile)} 
+                type="button"
+                className="text-[10px] font-semibold text-emerald-400 hover:text-emerald-200 bg-emerald-900/50 hover:bg-emerald-900 px-2 py-0.5 rounded border border-emerald-700/50 transition-colors ml-2 shrink-0"
+                title="Populate input fields with these saved optimal parameters"
+              >
+                Apply
+              </button>
+            </div>
+          )}
+
           {/* Capital & Stops Grid */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div>
@@ -389,6 +641,27 @@ Sell = Close < LLV(Low, 10).shift(1)
                 className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono"
               />
             </div>
+          </div>
+
+          {/* Optimization & Preset Action Buttons */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setShowOptModal(true)}
+              className="py-2 px-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-600 hover:to-indigo-600 text-white rounded-lg font-semibold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-purple-950/50 transition-all border border-purple-500/30"
+            >
+              <Cpu className="w-3.5 h-3.5 text-purple-200" />
+              <span>⚡ Optimize Basket</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveCurrentAsPreset}
+              className="py-2 px-2 bg-[#0d1117] hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white rounded-lg font-semibold text-[11px] flex items-center justify-center gap-1.5 transition-all"
+              title="Save current risk & capital parameters for this strategy and basket"
+            >
+              <Save className="w-3.5 h-3.5 text-blue-400" />
+              <span>Save Preset</span>
+            </button>
           </div>
 
           {/* Run Button */}
@@ -638,6 +911,401 @@ Sell = Close < LLV(Low, 10).shift(1)
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Optimization Modal */}
+      {showOptModal && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#161b22] border border-zinc-700/80 rounded-2xl max-w-3xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-fadeIn">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-zinc-800 flex items-center justify-between bg-[#0d1117]/60">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-purple-950/80 border border-purple-700/50 text-purple-400">
+                  <Cpu className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-bold text-white">Bayesian Parameter Optimizer</h2>
+                    <span className="text-[10px] font-semibold bg-purple-900/60 text-purple-300 border border-purple-700/50 px-2 py-0.5 rounded-full font-mono">
+                      Optuna TPE • State Checkpointed
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Finds optimal SL, TP, Trailing Stop, Risk % & Positions for <span className="text-purple-300 font-semibold">{selectedPresetName}</span> on <span className="text-emerald-400 font-semibold">{selectedUniverse}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOptModal(false)}
+                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+              {/* Target Setup Info */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0d1117] p-2.5 rounded-xl border border-zinc-800/80 text-[11px]">
+                <div>
+                  <span className="text-zinc-500 block text-[10px]">Strategy</span>
+                  <span className="text-white font-medium truncate block" title={selectedPresetName}>{selectedPresetName}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block text-[10px]">Target Universe</span>
+                  <span className="text-emerald-400 font-semibold">{selectedUniverse}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block text-[10px]">Horizon</span>
+                  <span className="text-zinc-300 font-mono">{lookbackPeriod.toUpperCase()}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block text-[10px]">Execution Timing</span>
+                  <span className="text-zinc-300">{executionTiming === 'next_open' ? 'Next Day Open' : 'Same Day Close'}</span>
+                </div>
+              </div>
+
+              {/* Controls Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-[#0d1117]/60 p-3 rounded-xl border border-zinc-800">
+                <div>
+                  <label className="text-[11px] text-zinc-400 block mb-1 font-medium">Optimization Target Metric</label>
+                  <select
+                    value={optMetric}
+                    onChange={e => setOptMetric(e.target.value)}
+                    disabled={optStatus?.status === 'running'}
+                    className="w-full bg-[#161b22] border border-zinc-700 text-zinc-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-purple-500 text-xs"
+                  >
+                    <option value="sharpe_ratio">Sharpe Ratio (Risk-Adjusted Return)</option>
+                    <option value="cagr_pct">CAGR % (Annualized Growth Rate)</option>
+                    <option value="calmar_ratio">Calmar Ratio (CAGR / Max Drawdown)</option>
+                    <option value="profit_factor">Profit Factor (Gross Win / Gross Loss)</option>
+                    <option value="total_return_pct">Total Return % (Net Capital Return)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-zinc-400 block mb-1 font-medium">Total Exploration Trials</label>
+                  <select
+                    value={optTrials}
+                    onChange={e => setOptTrials(Number(e.target.value))}
+                    disabled={optStatus?.status === 'running'}
+                    className="w-full bg-[#161b22] border border-zinc-700 text-zinc-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-purple-500 text-xs"
+                  >
+                    <option value={50}>50 Trials (Fast Quick Scan ~3s)</option>
+                    <option value={150}>150 Trials (Recommended Balance ~10s)</option>
+                    <option value={300}>300 Trials (Deep Bayesian Exploration ~20s)</option>
+                    <option value={500}>500 Trials (High Precision ~40s)</option>
+                    <option value={1000}>1000 Trials (Exhaustive Institutional Sweep ~1.5m)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Parameter Boundaries Grid */}
+              <div className="bg-[#0d1117]/60 p-3 rounded-xl border border-zinc-800 space-y-2">
+                <span className="text-[11px] font-semibold text-zinc-300 block">Parameter Search Boundaries</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                  <div className="p-2 rounded-lg bg-[#161b22] border border-zinc-800">
+                    <span className="text-zinc-400 text-[10px] block">Stop Loss % Range</span>
+                    <div className="flex items-center gap-1 mt-1 font-mono text-zinc-200">
+                      <input 
+                        type="number" 
+                        value={optRanges.sl_min} 
+                        onChange={e => setOptRanges({...optRanges, sl_min: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                      <span>-</span>
+                      <input 
+                        type="number" 
+                        value={optRanges.sl_max} 
+                        onChange={e => setOptRanges({...optRanges, sl_max: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                      <span>%</span>
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded-lg bg-[#161b22] border border-zinc-800">
+                    <span className="text-zinc-400 text-[10px] block">Take Profit % Range</span>
+                    <div className="flex items-center gap-1 mt-1 font-mono text-zinc-200">
+                      <input 
+                        type="number" 
+                        value={optRanges.tp_min} 
+                        onChange={e => setOptRanges({...optRanges, tp_min: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                      <span>-</span>
+                      <input 
+                        type="number" 
+                        value={optRanges.tp_max} 
+                        onChange={e => setOptRanges({...optRanges, tp_max: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                      <span>%</span>
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded-lg bg-[#161b22] border border-zinc-800">
+                    <span className="text-zinc-400 text-[10px] block">Risk / Trade % Range</span>
+                    <div className="flex items-center gap-1 mt-1 font-mono text-zinc-200">
+                      <input 
+                        type="number" 
+                        value={optRanges.risk_min} 
+                        onChange={e => setOptRanges({...optRanges, risk_min: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                      <span>-</span>
+                      <input 
+                        type="number" 
+                        value={optRanges.risk_max} 
+                        onChange={e => setOptRanges({...optRanges, risk_max: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                      <span>%</span>
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded-lg bg-[#161b22] border border-zinc-800">
+                    <span className="text-zinc-400 text-[10px] block">Max Positions</span>
+                    <div className="flex items-center gap-1 mt-1 font-mono text-zinc-200">
+                      <input 
+                        type="number" 
+                        value={optRanges.pos_min} 
+                        onChange={e => setOptRanges({...optRanges, pos_min: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                      <span>-</span>
+                      <input 
+                        type="number" 
+                        value={optRanges.pos_max} 
+                        onChange={e => setOptRanges({...optRanges, pos_max: Number(e.target.value)})}
+                        disabled={optStatus?.status === 'running'}
+                        className="w-12 bg-[#0d1117] border border-zinc-700 rounded px-1.5 py-0.5 text-center" 
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress & Live Status Box */}
+              <div className="p-3 rounded-xl bg-[#0d1117] border border-zinc-800 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-zinc-300">Optimization Status:</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      optStatus?.status === 'running' ? 'bg-emerald-950 text-emerald-300 border border-emerald-600 animate-pulse' :
+                      optStatus?.status === 'paused' ? 'bg-amber-950 text-amber-300 border border-amber-600' :
+                      optStatus?.status === 'completed' ? 'bg-blue-950 text-blue-300 border border-blue-600' :
+                      optStatus?.status === 'error' ? 'bg-rose-950 text-rose-300 border border-rose-600' :
+                      'bg-zinc-800 text-zinc-400'
+                    }`}>
+                      {optStatus?.status || 'IDLE'}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-mono">
+                    Trial {optStatus?.completed_trials || 0} / {optTrials} ({optStatus?.progress_pct || 0}%)
+                  </span>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="w-full bg-zinc-800/80 rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-400 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.min(100, optStatus?.progress_pct || 0)}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-zinc-500">
+                  <span>SQLite Checkpoint: <code className="text-zinc-400">optuna_studies.db</code></span>
+                  <span>{optStatus?.status === 'running' ? 'Saving trials on-the-fly' : optStatus?.status === 'paused' ? 'Safely paused • Ready to resume' : 'Zero compute lost'}</span>
+                </div>
+              </div>
+
+              {/* Best Result Highlight Card */}
+              {optStatus && optStatus.best_value !== null && optStatus.best_value !== undefined ? (
+                <div className="p-3.5 rounded-xl bg-gradient-to-br from-purple-950/40 via-zinc-900 to-[#161b22] border border-purple-600/40 shadow-lg space-y-3">
+                  <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2">
+                    <div className="flex items-center gap-1.5 text-purple-300 font-semibold text-xs">
+                      <Sparkles className="w-4 h-4 text-purple-400" />
+                      <span>Current Best Discovery</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">({optStatus.target_metric})</span>
+                    </div>
+                    <span className="text-base font-extrabold font-mono text-emerald-400">
+                      {optStatus.best_value > 0 ? '+' : ''}{optStatus.best_value.toFixed(2)}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+                    <div className="p-2 rounded-lg bg-[#0d1117] border border-zinc-800">
+                      <span className="text-[10px] text-zinc-500 block">Stop Loss</span>
+                      <span className="text-xs font-bold text-white font-mono">{optStatus.best_params.stop_loss_pct}%</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-[#0d1117] border border-zinc-800">
+                      <span className="text-[10px] text-zinc-500 block">Take Profit</span>
+                      <span className="text-xs font-bold text-emerald-400 font-mono">{optStatus.best_params.take_profit_pct}%</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-[#0d1117] border border-zinc-800">
+                      <span className="text-[10px] text-zinc-500 block">Trailing Stop</span>
+                      <span className="text-xs font-bold text-indigo-300 font-mono">
+                        {optStatus.best_params.enable_trailing_stop ? `${optStatus.best_params.trailing_stop_pct}%` : 'Disabled'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-[#0d1117] border border-zinc-800">
+                      <span className="text-[10px] text-zinc-500 block">Risk / Trade</span>
+                      <span className="text-xs font-bold text-white font-mono">{optStatus.best_params.risk_per_trade_pct}%</span>
+                    </div>
+                    <div className="p-2 rounded-lg bg-[#0d1117] border border-zinc-800">
+                      <span className="text-[10px] text-zinc-500 block">Max Positions</span>
+                      <span className="text-xs font-bold text-white font-mono">{optStatus.best_params.max_positions}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 text-[11px] bg-[#0d1117]/50 p-2 rounded-lg border border-zinc-800/50">
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Win Rate</span>
+                      <span className="font-semibold text-emerald-400 font-mono">{optStatus.best_metrics.win_rate ?? 0}%</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Max Drawdown</span>
+                      <span className="font-semibold text-rose-400 font-mono">{optStatus.best_metrics.max_drawdown_pct ?? 0}%</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">CAGR %</span>
+                      <span className="font-semibold text-zinc-200 font-mono">{optStatus.best_metrics.cagr_pct ?? 0}%</span>
+                    </div>
+                    <div>
+                      <span className="text-zinc-500 text-[10px] block">Total Trades</span>
+                      <span className="font-semibold text-zinc-300 font-mono">{optStatus.best_metrics.total_trades ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl bg-[#0d1117] border border-dashed border-zinc-800 text-center text-zinc-500">
+                  <Cpu className="w-6 h-6 mx-auto mb-2 text-zinc-600" />
+                  <p className="text-[11px]">No active trials in this session. Click &quot;Start Bayesian Optimization&quot; to begin exploration.</p>
+                  <p className="text-[10px] text-zinc-600 mt-1">Evaluates multi-year basket simulations using Tree-structured Parzen Estimator (TPE).</p>
+                </div>
+              )}
+
+              {/* Recent Trials Table */}
+              {optStatus && optStatus.recent_trials && optStatus.recent_trials.length > 0 && (
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-semibold text-zinc-400 block">Recent Trial Explored Samples:</span>
+                  <div className="max-h-36 overflow-y-auto rounded-lg border border-zinc-800 bg-[#0d1117]">
+                    <table className="w-full text-left text-[10px]">
+                      <thead className="bg-[#161b22] text-zinc-400 sticky top-0">
+                        <tr>
+                          <th className="p-1.5">#</th>
+                          <th className="p-1.5">Metric ({optMetric})</th>
+                          <th className="p-1.5">SL %</th>
+                          <th className="p-1.5">TP %</th>
+                          <th className="p-1.5">Trail %</th>
+                          <th className="p-1.5">Risk %</th>
+                          <th className="p-1.5">Win Rate</th>
+                          <th className="p-1.5">Max DD</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800/40 text-zinc-300 font-mono">
+                        {optStatus.recent_trials.slice(-8).reverse().map((t, idx) => (
+                          <tr key={idx} className="hover:bg-zinc-800/30">
+                            <td className="p-1.5 text-zinc-500">{t.trial_number}</td>
+                            <td className="p-1.5 font-bold text-emerald-400">{t.value}</td>
+                            <td className="p-1.5">{t.params.stop_loss_pct}%</td>
+                            <td className="p-1.5">{t.params.take_profit_pct}%</td>
+                            <td className="p-1.5">{t.params.enable_trailing_stop ? `${t.params.trailing_stop_pct}%` : '-'}</td>
+                            <td className="p-1.5">{t.params.risk_per_trade_pct}%</td>
+                            <td className="p-1.5">{t.metrics.win_rate ?? 0}%</td>
+                            <td className="p-1.5 text-rose-400">{t.metrics.max_drawdown_pct ?? 0}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="p-3.5 border-t border-zinc-800 bg-[#0d1117] flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleResetOpt}
+                disabled={optStatus?.status === 'running'}
+                className="py-1.5 px-3 rounded-lg text-zinc-400 hover:text-rose-400 hover:bg-rose-950/30 border border-zinc-800 text-[11px] transition-colors disabled:opacity-40"
+              >
+                Reset Study
+              </button>
+
+              <div className="flex items-center gap-2">
+                {optStatus?.status === 'running' ? (
+                  <button
+                    type="button"
+                    onClick={handlePauseOpt}
+                    className="py-2 px-4 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-amber-950 transition-all"
+                  >
+                    <Pause className="w-3.5 h-3.5 fill-current" />
+                    <span>Pause & Save Checkpoint</span>
+                  </button>
+                ) : optStatus?.status === 'paused' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleResumeOpt}
+                      className="py-2 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-all"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>Resume Optimization</span>
+                    </button>
+                    {optStatus.best_value !== null && (
+                      <button
+                        type="button"
+                        onClick={handleApplyOpt}
+                        className="py-2 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-purple-950 transition-all"
+                      >
+                        <Zap className="w-3.5 h-3.5 fill-current" />
+                        <span>Apply & Save to Basket</span>
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleStartOpt}
+                      disabled={optLoading}
+                      className="py-2 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-purple-950 transition-all disabled:opacity-50"
+                    >
+                      {optLoading ? (
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      )}
+                      <span>{optStatus?.completed_trials ? 'Run More Trials' : 'Start Optimization'}</span>
+                    </button>
+
+                    {optStatus?.best_value !== null && optStatus?.best_value !== undefined && (
+                      <button
+                        type="button"
+                        onClick={handleApplyOpt}
+                        className="py-2 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-950 transition-all"
+                      >
+                        <Zap className="w-3.5 h-3.5 fill-current" />
+                        <span>Apply & Save to Basket</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
         </div>

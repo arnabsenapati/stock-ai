@@ -151,3 +151,66 @@ export interface ScreenerResponse {
   match_count: number;
   results: ScreenerMatch[];
 }
+
+export interface OptimizationTrial {
+  trial_number: number;
+  value: number;
+  params: {
+    stop_loss_pct?: number;
+    take_profit_pct?: number;
+    trailing_stop_pct?: number;
+    risk_per_trade_pct?: number;
+    max_positions?: number;
+    enable_trailing_stop?: boolean;
+    [key: string]: any;
+  };
+  metrics: {
+    total_trades?: number;
+    win_rate?: number;
+    total_return_pct?: number;
+    max_drawdown_pct?: number;
+    sharpe_ratio?: number;
+    cagr_pct?: number;
+    profit_factor?: number;
+    calmar_ratio?: number;
+    [key: string]: any;
+  };
+}
+
+export interface OptimizationStatusResponse {
+  status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
+  strategy_name: string;
+  universe: string;
+  study_name: string;
+  target_metric: string;
+  target_trials: number;
+  completed_trials: number;
+  progress_pct: number;
+  best_value: number | null;
+  best_params: Record<string, any>;
+  best_metrics: Record<string, any>;
+  recent_trials: OptimizationTrial[];
+  error_message: string | null;
+  started_at: string | null;
+  last_updated_at: string | null;
+}
+
+export interface StrategyBasketProfile {
+  strategy_name: string;
+  universe: string;
+  initial_capital: number;
+  risk_per_trade_pct: number;
+  stop_loss_pct: number | null;
+  take_profit_pct: number | null;
+  trailing_stop_pct: number | null;
+  max_positions: number;
+  best_metric_name: string;
+  best_metric_value: number;
+  total_trades: number;
+  win_rate: number;
+  total_return_pct: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  cagr_pct: number;
+  updated_at: string;
+}

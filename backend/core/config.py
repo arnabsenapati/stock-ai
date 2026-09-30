@@ -6,11 +6,14 @@ DATA_DIR = BASE_DIR / "data_lake"
 PARQUET_DIR = DATA_DIR / "parquet"
 BHAVCOPY_DIR = DATA_DIR / "bhavcopy"
 DUCKDB_PATH = DATA_DIR / "market_data.duckdb"
+OPTUNA_DB_PATH = DATA_DIR / "optuna_studies.db"
+PRESETS_DIR = DATA_DIR / "presets"
 
 # Ensure directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 PARQUET_DIR.mkdir(parents=True, exist_ok=True)
 BHAVCOPY_DIR.mkdir(parents=True, exist_ok=True)
+PRESETS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Standard Indian Market Universes
 NIFTY_50_SYMBOLS = [

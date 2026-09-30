@@ -18,6 +18,7 @@ from backend.analytics.chart_types import chart_converter
 from backend.backtester.engine import backtest_engine
 from backend.backtester.strategy_dsl import PRESET_STRATEGIES
 from backend.screener.scanner import screener
+from backend.backtester.optimizer import strategy_optimizer
 
 app = FastAPI(
     title="AmiBroker-Class Indian EOD Stock Terminal",
@@ -63,6 +64,40 @@ class ScreenerRequest(BaseModel):
     custom_formula: Optional[str] = None
     lookback_days: int = 3
     signal_filter: str = "ALL"
+
+class OptimizeStartRequest(BaseModel):
+    strategy_name: str = "SuperTrend + 100 SMA Trend Rider (Optimal)"
+    universe: str = "Nifty 50"
+    strategy_code: str
+    target_trials: int = 150
+    target_metric: str = "sharpe_ratio"
+    initial_capital: float = 100000.0
+    execution_timing: str = "next_open"
+    param_ranges: Optional[Dict[str, Any]] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class OptimizeActionRequest(BaseModel):
+    strategy_name: str
+    universe: str
+
+class StrategyPresetSaveRequest(BaseModel):
+    strategy_name: str
+    universe: str
+    initial_capital: float = 100000.0
+    risk_per_trade_pct: float = 10.0
+    stop_loss_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    max_positions: int = 10
+    best_metric_name: Optional[str] = "sharpe_ratio"
+    best_metric_value: Optional[float] = 0.0
+    total_trades: Optional[int] = 0
+    win_rate: Optional[float] = 0.0
+    total_return_pct: Optional[float] = 0.0
+    max_drawdown_pct: Optional[float] = 0.0
+    sharpe_ratio: Optional[float] = 0.0
+    cagr_pct: Optional[float] = 0.0
 
 # Routes
 @app.get("/")
@@ -345,6 +380,91 @@ def run_screener(req: ScreenerRequest):
         "match_count": len(results),
         "results": results
     }
+
+# ==========================================
+# Strategy & Basket Optimization Endpoints
+# ==========================================
+@app.post("/api/optimize/start")
+def start_optimization(req: OptimizeStartRequest):
+    """Start or resume background Optuna optimization for strategy + basket"""
+    try:
+        strategy_optimizer.start_optimization(
+            strategy_name=req.strategy_name,
+            universe=req.universe,
+            strategy_code=req.strategy_code,
+            target_trials=req.target_trials,
+            target_metric=req.target_metric,
+            initial_capital=req.initial_capital,
+            execution_timing=req.execution_timing,
+            param_ranges=req.param_ranges,
+            start_date=req.start_date,
+            end_date=req.end_date
+        )
+        return {"status": "started", "message": f"Optimization started for {req.strategy_name} on {req.universe}"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/optimize/pause")
+def pause_optimization():
+    """Safely pause optimization; current trial commits to SQLite checkpoint"""
+    try:
+        res = strategy_optimizer.pause_optimization()
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/optimize/resume")
+def resume_optimization():
+    """Resume optimization from SQLite checkpoint"""
+    try:
+        res = strategy_optimizer.resume_optimization()
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/api/optimize/status")
+def get_optimization_status():
+    """Live status, trial progress, and current best parameters"""
+    return strategy_optimizer.get_status()
+
+@app.post("/api/optimize/reset")
+def reset_optimization(req: OptimizeActionRequest):
+    """Reset persistent study for strategy + universe"""
+    return strategy_optimizer.reset_study(req.strategy_name, req.universe)
+
+@app.post("/api/optimize/apply")
+def apply_optimization(req: OptimizeActionRequest):
+    """Persist best trial parameters to DuckDB and JSON preset profile"""
+    try:
+        saved_profile = strategy_optimizer.apply_best_profile(req.strategy_name, req.universe)
+        return {
+            "status": "applied",
+            "message": f"Optimal parameters saved for {req.strategy_name} on {req.universe}",
+            "profile": saved_profile
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ==========================================
+# Strategy & Basket Presets Management
+# ==========================================
+@app.get("/api/presets/profile")
+def get_preset_profile(strategy_name: str = Query(...), universe: str = Query(...)):
+    """Fetch saved preset for strategy + universe pair"""
+    profile = db.get_strategy_basket_profile(strategy_name, universe)
+    return {"profile": profile}
+
+@app.post("/api/presets/save")
+def save_preset_profile(req: StrategyPresetSaveRequest):
+    """Manual save/update preset for strategy + universe"""
+    profile_dict = req.dict()
+    db.save_strategy_basket_profile(profile_dict)
+    return {"status": "saved", "profile": profile_dict}
+
+@app.get("/api/presets/all")
+def get_all_preset_profiles():
+    """List all saved strategy + basket profiles"""
+    return {"profiles": db.list_strategy_basket_profiles()}
 
 if __name__ == "__main__":
     import uvicorn
