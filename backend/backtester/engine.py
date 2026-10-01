@@ -7,7 +7,7 @@ from backend.backtester.strategy_dsl import StrategyEvaluator
 
 class BacktestEngine:
     def __init__(self,
-                 initial_capital: float = 1000000.0,
+                 initial_capital: float = 100000.0,
                  max_positions: int = 10,
                  risk_per_trade_pct: float = 10.0,
                  stop_loss_pct: Optional[float] = None,
@@ -15,7 +15,11 @@ class BacktestEngine:
                  trailing_stop_pct: Optional[float] = None,
                  slippage_pct: float = 0.05,
                  brokerage_pct: float = 0.10,
-                 execution_timing: str = "next_open"): # 'next_open' or 'same_close'
+                 execution_timing: str = "next_open", # 'next_open' or 'same_close'
+                 compounding: bool = True,
+                 partial_tp_pct: Optional[float] = None,
+                 partial_tp_ratio: float = 50.0,
+                 breakeven_on_partial: bool = False):
         self.initial_capital = initial_capital
         self.max_positions = max_positions
         self.risk_per_trade_pct = risk_per_trade_pct
@@ -25,6 +29,10 @@ class BacktestEngine:
         self.slippage_pct = slippage_pct / 100.0
         self.brokerage_pct = brokerage_pct / 100.0
         self.execution_timing = execution_timing
+        self.compounding = compounding
+        self.partial_tp_pct = partial_tp_pct
+        self.partial_tp_ratio = partial_tp_ratio
+        self.breakeven_on_partial = breakeven_on_partial
 
     def run_single_stock(self, symbol: str, strategy_code: str, 
                          start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
@@ -103,11 +111,62 @@ class BacktestEngine:
                 sell_signal = bar.get('sell_signal', False)
 
                 pos['highest_price'] = max(pos['highest_price'], high_price)
+                
+                # Check Partial Take Profit (Scale Out)
+                if (not pos.get('partial_booked', False)
+                    and self.partial_tp_pct is not None
+                    and pos['qty'] >= 2):
+                    partial_th = pos['entry_price'] * (1.0 + self.partial_tp_pct / 100.0)
+                    if high_price >= partial_th:
+                        p_exit_px = max(bar['open'], partial_th)
+                        p_qty = max(1, int(round(pos['qty'] * (self.partial_tp_ratio / 100.0))))
+                        if p_qty < pos['qty']:
+                            eff_part_px = p_exit_px * (1.0 - self.slippage_pct)
+                            gross_part = eff_part_px * p_qty
+                            part_costs = gross_part * self.brokerage_pct
+                            net_part = gross_part - part_costs
+                            
+                            cost_share = pos['total_cost'] * (p_qty / pos['qty'])
+                            part_pnl = net_part - cost_share
+                            part_pnl_pct = (part_pnl / cost_share) * 100.0
+                            
+                            cash += net_part
+                            pos['qty'] -= p_qty
+                            pos['total_cost'] -= cost_share
+                            pos['partial_booked'] = True
+                            if self.breakeven_on_partial:
+                                pos['be_active'] = True
+                                
+                            part_holding_days = (current_date - pos['entry_date']).days
+                            part_trade_val = round(float(pos['entry_price'] * p_qty), 2)
+                            part_exit_val = round(float(eff_part_px * p_qty), 2)
+                            
+                            trades_log.append({
+                                "symbol": sym,
+                                "entry_date": str(pos['entry_date']),
+                                "exit_date": str(current_date),
+                                "entry_price": round(float(pos['entry_price']), 2),
+                                "exit_price": round(float(eff_part_px), 2),
+                                "qty": int(p_qty),
+                                "trade_value": part_trade_val,
+                                "exit_value": part_exit_val,
+                                "turnover": round(float(part_trade_val + part_exit_val), 2),
+                                "pnl": round(float(part_pnl), 2),
+                                "return_pct": round(float(part_pnl_pct), 2),
+                                "holding_days": int(part_holding_days),
+                                "exit_reason": f"Partial TP ({int(self.partial_tp_ratio)}%)"
+                            })
+
                 exit_price = None
                 exit_reason = None
 
-                # Check Stop Loss
-                if self.stop_loss_pct is not None:
+                # Check Stop Loss (Breakeven or Standard)
+                if pos.get('be_active', False):
+                    be_threshold = pos['entry_price']
+                    if low_price <= be_threshold:
+                        exit_price = min(bar['open'], be_threshold)
+                        exit_reason = "Breakeven Stop"
+                elif self.stop_loss_pct is not None:
                     sl_threshold = pos['entry_price'] * (1.0 - self.stop_loss_pct / 100.0)
                     if low_price <= sl_threshold:
                         exit_price = min(bar['open'], sl_threshold) # conservative execution
@@ -118,7 +177,7 @@ class BacktestEngine:
                     tp_threshold = pos['entry_price'] * (1.0 + self.take_profit_pct / 100.0)
                     if high_price >= tp_threshold:
                         exit_price = max(bar['open'], tp_threshold)
-                        exit_reason = "Take Profit"
+                        exit_reason = "Runner Take Profit" if pos.get('partial_booked', False) else "Take Profit"
 
                 # Check Trailing Stop
                 if exit_price is None and self.trailing_stop_pct is not None:
@@ -131,10 +190,10 @@ class BacktestEngine:
                 if exit_price is None and sell_signal:
                     if self.execution_timing == "next_open":
                         exit_price = bar['open']
-                        exit_reason = "Sell Signal (Next Open)"
+                        exit_reason = "Runner Exit (Next Open)" if pos.get('partial_booked', False) else "Sell Signal (Next Open)"
                     else:
                         exit_price = close_price
-                        exit_reason = "Sell Signal (EOD Close)"
+                        exit_reason = "Runner Exit (EOD Close)" if pos.get('partial_booked', False) else "Sell Signal (EOD Close)"
 
                 # Execute Exit
                 if exit_price is not None:
@@ -176,7 +235,8 @@ class BacktestEngine:
 
             # 2. Check for new buy entries
             available_slots = self.max_positions - len(open_positions)
-            if available_slots > 0 and cash > 5000:
+            min_cash_threshold = min(5000.0, self.initial_capital * 0.05)
+            if available_slots > 0 and cash >= min_cash_threshold:
                 candidate_buys = []
                 for sym in symbol_dfs.keys():
                     if sym in open_positions:
@@ -188,27 +248,47 @@ class BacktestEngine:
                             entry_px = bar['open'] if self.execution_timing == "next_open" else bar['close']
                             candidate_buys.append((sym, entry_px))
 
-                # Allocate capital equally among available candidates
-                for sym, price in candidate_buys[:available_slots]:
-                    # Allocation budget
-                    alloc_budget = min(cash, (self.initial_capital * (self.risk_per_trade_pct / 100.0)))
-                    if alloc_budget < 2000:
-                        break
+                if candidate_buys:
+                    if self.compounding:
+                        # Dynamic equity sizing: cash + current market value of open positions
+                        current_invested = 0.0
+                        for open_sym, pos in open_positions.items():
+                            sym_t = date_indexed.get(open_sym)
+                            if sym_t is not None and current_date in sym_t.index:
+                                px = sym_t.loc[current_date]['open'] if self.execution_timing == "next_open" else sym_t.loc[current_date]['close']
+                            else:
+                                px = pos['entry_price']
+                            current_invested += px * pos['qty']
+                        base_capital = max(cash + current_invested, 0.0)
+                    else:
+                        base_capital = self.initial_capital
 
-                    eff_entry_price = price * (1.0 + self.slippage_pct)
-                    qty = int(alloc_budget // eff_entry_price)
-                    if qty > 0:
-                        gross_cost = qty * eff_entry_price
-                        total_cost = gross_cost * (1.0 + self.brokerage_pct)
-                        if total_cost <= cash:
-                            cash -= total_cost
-                            open_positions[sym] = {
-                                "entry_date": current_date,
-                                "entry_price": eff_entry_price,
-                                "qty": qty,
-                                "total_cost": total_cost,
-                                "highest_price": eff_entry_price
-                            }
+                    target_budget = base_capital * (self.risk_per_trade_pct / 100.0)
+                    min_trade_budget = min(2000.0, self.initial_capital * 0.02)
+
+                    # Allocate capital among available candidates
+                    for sym, price in candidate_buys[:available_slots]:
+                        alloc_budget = min(cash, target_budget)
+                        if alloc_budget < min_trade_budget:
+                            break
+
+                        eff_entry_price = price * (1.0 + self.slippage_pct)
+                        qty = int(alloc_budget // eff_entry_price)
+                        if qty > 0:
+                            gross_cost = qty * eff_entry_price
+                            total_cost = gross_cost * (1.0 + self.brokerage_pct)
+                            if total_cost <= cash:
+                                cash -= total_cost
+                                open_positions[sym] = {
+                                    "entry_date": current_date,
+                                    "entry_price": eff_entry_price,
+                                    "qty": qty,
+                                    "initial_qty": qty,
+                                    "total_cost": total_cost,
+                                    "highest_price": eff_entry_price,
+                                    "partial_booked": False,
+                                    "be_active": False
+                                }
 
             # 3. Calculate portfolio equity at end of day
             invested_value = 0.0
@@ -232,6 +312,10 @@ class BacktestEngine:
 
         return {
             "execution_timing": self.execution_timing,
+            "compounding": self.compounding,
+            "partial_tp_pct": self.partial_tp_pct,
+            "partial_tp_ratio": self.partial_tp_ratio,
+            "breakeven_on_partial": self.breakeven_on_partial,
             "metrics": metrics,
             "equity_curve": equity_curve,
             "trades": trades_log,

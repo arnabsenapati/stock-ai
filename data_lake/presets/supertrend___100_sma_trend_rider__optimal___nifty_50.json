@@ -1,0 +1,18 @@
+{
+  "strategy_name": "SuperTrend + 100 SMA Trend Rider (Optimal)",
+  "universe": "Nifty 50",
+  "initial_capital": 100000.0,
+  "risk_per_trade_pct": 25.0,
+  "stop_loss_pct": 8.0,
+  "take_profit_pct": 15.5,
+  "trailing_stop_pct": null,
+  "max_positions": 5,
+  "best_metric_name": "sharpe_ratio",
+  "best_metric_value": 0.42,
+  "total_trades": 154,
+  "win_rate": 0.0,
+  "total_return_pct": 65.24,
+  "max_drawdown_pct": 16.09,
+  "sharpe_ratio": 0.42,
+  "cagr_pct": 10.73
+}

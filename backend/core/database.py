@@ -38,6 +38,7 @@ class DatabaseManager:
                     take_profit_pct DOUBLE,
                     trailing_stop_pct DOUBLE,
                     max_positions INT,
+                    compounding BOOLEAN DEFAULT TRUE,
                     best_metric_name VARCHAR,
                     best_metric_value DOUBLE,
                     total_trades INT,
@@ -50,6 +51,10 @@ class DatabaseManager:
                     PRIMARY KEY (strategy_name, universe)
                 );
             """)
+            try:
+                con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN compounding BOOLEAN DEFAULT TRUE;")
+            except Exception:
+                pass
 
     def save_symbol_data(self, symbol: str, df: pd.DataFrame, source: str = "yfinance"):
         """Save OHLCV dataframe for a symbol to DuckDB and Parquet cache"""
@@ -170,9 +175,10 @@ class DatabaseManager:
                 INSERT OR REPLACE INTO strategy_basket_profiles (
                     strategy_name, universe, initial_capital, risk_per_trade_pct,
                     stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
+                    compounding,
                     best_metric_name, best_metric_value, total_trades, win_rate,
                     total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, [
                 profile.get("strategy_name"),
                 profile.get("universe"),
@@ -182,6 +188,7 @@ class DatabaseManager:
                 float(profile["take_profit_pct"]) if profile.get("take_profit_pct") is not None else None,
                 float(profile["trailing_stop_pct"]) if profile.get("trailing_stop_pct") is not None else None,
                 int(profile.get("max_positions", 10)),
+                bool(profile.get("compounding", True)),
                 profile.get("best_metric_name", "sharpe_ratio"),
                 float(profile.get("best_metric_value", 0.0)),
                 int(profile.get("total_trades", 0)),
@@ -199,6 +206,7 @@ class DatabaseManager:
                 SELECT 
                     strategy_name, universe, initial_capital, risk_per_trade_pct,
                     stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
+                    compounding,
                     best_metric_name, best_metric_value, total_trades, win_rate,
                     total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct,
                     strftime(updated_at, '%Y-%m-%d %H:%M:%S') as updated_at
@@ -218,15 +226,16 @@ class DatabaseManager:
                 "take_profit_pct": res[5],
                 "trailing_stop_pct": res[6],
                 "max_positions": res[7],
-                "best_metric_name": res[8],
-                "best_metric_value": res[9],
-                "total_trades": res[10],
-                "win_rate": res[11],
-                "total_return_pct": res[12],
-                "max_drawdown_pct": res[13],
-                "sharpe_ratio": res[14],
-                "cagr_pct": res[15],
-                "updated_at": res[16]
+                "compounding": bool(res[8]) if res[8] is not None else True,
+                "best_metric_name": res[9],
+                "best_metric_value": res[10],
+                "total_trades": res[11],
+                "win_rate": res[12],
+                "total_return_pct": res[13],
+                "max_drawdown_pct": res[14],
+                "sharpe_ratio": res[15],
+                "cagr_pct": res[16],
+                "updated_at": res[17]
             }
 
     def list_strategy_basket_profiles(self) -> List[Dict[str, Any]]:
@@ -236,6 +245,7 @@ class DatabaseManager:
                 SELECT 
                     strategy_name, universe, initial_capital, risk_per_trade_pct,
                     stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
+                    compounding,
                     best_metric_name, best_metric_value, total_trades, win_rate,
                     total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct,
                     strftime(updated_at, '%Y-%m-%d %H:%M:%S') as updated_at
@@ -252,15 +262,16 @@ class DatabaseManager:
                 "take_profit_pct": r[5],
                 "trailing_stop_pct": r[6],
                 "max_positions": r[7],
-                "best_metric_name": r[8],
-                "best_metric_value": r[9],
-                "total_trades": r[10],
-                "win_rate": r[11],
-                "total_return_pct": r[12],
-                "max_drawdown_pct": r[13],
-                "sharpe_ratio": r[14],
-                "cagr_pct": r[15],
-                "updated_at": r[16]
+                "compounding": bool(r[8]) if r[8] is not None else True,
+                "best_metric_name": r[9],
+                "best_metric_value": r[10],
+                "total_trades": r[11],
+                "win_rate": r[12],
+                "total_return_pct": r[13],
+                "max_drawdown_pct": r[14],
+                "sharpe_ratio": r[15],
+                "cagr_pct": r[16],
+                "updated_at": r[17]
             } for r in rows]
 
 db = DatabaseManager()

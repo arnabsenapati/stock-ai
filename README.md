@@ -50,6 +50,13 @@ A high-performance End-of-Day (EOD) stock market analytics, multi-pane charting,
    - Yahoo Finance bridge for historical multi-year backfills.
    - Local columnar Parquet & DuckDB storage: reads 500+ stocks in under 50ms without database server overhead.
 
+6. **Progressive Web App (PWA) & Desktop Standalone Mode**:
+   - Installable directly as a native desktop or mobile application (Chrome, Edge, Safari, Android).
+   - Service Worker caching app shell, navigation, and static charting bundles.
+   - Built-in offline fallback page with connection state recovery.
+   - OS shortcuts for 1-click access directly into Chart Studio, Backtester, Screener, or Data Hub.
+   - Interactive in-app installation banner and online/offline connectivity indicator.
+
 ---
 
 ## 🚀 Quick Start Guide

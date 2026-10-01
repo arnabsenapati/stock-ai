@@ -46,7 +46,7 @@ class BacktestRequest(BaseModel):
     universe: Optional[str] = "Nifty 50"
     custom_symbols: Optional[List[str]] = None
     strategy_code: str
-    initial_capital: float = 1000000.0
+    initial_capital: float = 100000.0
     risk_per_trade_pct: float = 10.0
     max_positions: int = 10
     stop_loss_pct: Optional[float] = None
@@ -55,6 +55,10 @@ class BacktestRequest(BaseModel):
     slippage_pct: float = 0.05
     brokerage_pct: float = 0.10
     execution_timing: str = "next_open"
+    compounding: bool = True
+    partial_tp_pct: Optional[float] = None
+    partial_tp_ratio: float = 50.0
+    breakeven_on_partial: bool = False
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
@@ -73,6 +77,7 @@ class OptimizeStartRequest(BaseModel):
     target_metric: str = "sharpe_ratio"
     initial_capital: float = 100000.0
     execution_timing: str = "next_open"
+    compounding: bool = True
     param_ranges: Optional[Dict[str, Any]] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -90,6 +95,7 @@ class StrategyPresetSaveRequest(BaseModel):
     take_profit_pct: Optional[float] = None
     trailing_stop_pct: Optional[float] = None
     max_positions: int = 10
+    compounding: Optional[bool] = True
     best_metric_name: Optional[str] = "sharpe_ratio"
     best_metric_value: Optional[float] = 0.0
     total_trades: Optional[int] = 0
@@ -330,6 +336,10 @@ def run_backtest(req: BacktestRequest):
     engine.slippage_pct = req.slippage_pct / 100.0
     engine.brokerage_pct = req.brokerage_pct / 100.0
     engine.execution_timing = req.execution_timing
+    engine.compounding = req.compounding
+    engine.partial_tp_pct = req.partial_tp_pct
+    engine.partial_tp_ratio = req.partial_tp_ratio
+    engine.breakeven_on_partial = req.breakeven_on_partial
 
     try:
         if req.mode == "single":
@@ -396,6 +406,7 @@ def start_optimization(req: OptimizeStartRequest):
             target_metric=req.target_metric,
             initial_capital=req.initial_capital,
             execution_timing=req.execution_timing,
+            compounding=req.compounding,
             param_ranges=req.param_ranges,
             start_date=req.start_date,
             end_date=req.end_date

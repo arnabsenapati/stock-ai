@@ -193,6 +193,7 @@ class OptunaStrategyOptimizer:
                            target_metric: str = "sharpe_ratio",
                            initial_capital: float = 100000.0,
                            execution_timing: str = "next_open",
+                           compounding: bool = True,
                            param_ranges: Optional[Dict[str, Any]] = None,
                            start_date: Optional[str] = None,
                            end_date: Optional[str] = None):
@@ -230,7 +231,7 @@ class OptunaStrategyOptimizer:
         self.status = "running"
         self._thread = threading.Thread(
             target=self._run_optimization_loop,
-            args=(strategy_name, universe, initial_capital, execution_timing, param_ranges or {}),
+            args=(strategy_name, universe, initial_capital, execution_timing, compounding, param_ranges or {}),
             daemon=True
         )
         self._thread.start()
@@ -279,6 +280,7 @@ class OptunaStrategyOptimizer:
                                universe: str,
                                initial_capital: float,
                                execution_timing: str,
+                               compounding: bool,
                                ranges: Dict[str, Any]):
         """Background execution loop running Optuna trials step-by-step"""
         study_name = self.get_study_name(strategy_name, universe)
@@ -345,7 +347,8 @@ class OptunaStrategyOptimizer:
                 trailing_stop_pct=trailing_stop,
                 slippage_pct=0.05,
                 brokerage_pct=0.10,
-                execution_timing=execution_timing
+                execution_timing=execution_timing,
+                compounding=compounding
             )
 
             # Fast simulate using precomputed signals

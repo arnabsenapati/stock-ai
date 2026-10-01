@@ -117,6 +117,10 @@ export interface MonthlyReturnItem {
 
 export interface BacktestResponse {
   execution_timing?: 'next_open' | 'same_close';
+  compounding?: boolean;
+  partial_tp_pct?: number | null;
+  partial_tp_ratio?: number;
+  breakeven_on_partial?: boolean;
   metrics: BacktestMetrics;
   equity_curve: EquityPoint[];
   trades: TradeItem[];
@@ -204,6 +208,7 @@ export interface StrategyBasketProfile {
   take_profit_pct: number | null;
   trailing_stop_pct: number | null;
   max_positions: number;
+  compounding?: boolean;
   best_metric_name: string;
   best_metric_value: number;
   total_trades: number;

@@ -13,7 +13,9 @@ import {
   Layers,
   Sparkles,
   TrendingUp,
-  Activity
+  Activity,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
 import TradingChart from '../components/TradingChart';
@@ -21,6 +23,7 @@ import Watchlist from '../components/Watchlist';
 import BacktestStudio from '../components/BacktestStudio';
 import ScreenerView from '../components/ScreenerView';
 import DataHub from '../components/DataHub';
+import { PWAInstallButton, usePWA } from '../components/PWAProvider';
 import { ChartDataResponse } from '../types';
 
 export default function Home() {
@@ -31,6 +34,18 @@ export default function Home() {
   const [availableSymbols, setAvailableSymbols] = useState<string[]>([]);
   const [chartData, setChartData] = useState<ChartDataResponse | null>(null);
   const [loadingChart, setLoadingChart] = useState(false);
+  const { isOnline } = usePWA();
+
+  // Support direct PWA shortcut / query param tab switching
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam && ['chart', 'backtest', 'screener', 'data'].includes(tabParam)) {
+        setActiveTab(tabParam as 'chart' | 'backtest' | 'screener' | 'data');
+      }
+    }
+  }, []);
 
   // Fetch initial symbol list
   const fetchSymbols = async () => {
@@ -141,12 +156,21 @@ export default function Home() {
           </nav>
         </div>
 
-        {/* Right Info Badges */}
+        {/* Right Info Badges & PWA Action */}
         <div className="flex items-center gap-3 text-xs">
-          <div className="flex items-center gap-2 bg-[#0d1117] px-2.5 py-1 rounded-lg border border-zinc-800 font-mono text-[11px]">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          {/* PWA Direct Installation Button */}
+          <PWAInstallButton />
+
+          {/* Connectivity Status */}
+          <div className="flex items-center gap-1.5 bg-[#0d1117] px-2.5 py-1 rounded-lg border border-zinc-800 font-mono text-[11px]">
+            <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span className="text-zinc-400 hidden sm:inline">{isOnline ? 'Online' : 'Offline'}</span>
+          </div>
+
+          <div className="hidden md:flex items-center gap-2 bg-[#0d1117] px-2.5 py-1 rounded-lg border border-zinc-800 font-mono text-[11px]">
+            <span className="w-2 h-2 rounded-full bg-blue-400" />
             <span className="text-zinc-400">Engine:</span>
-            <span className="text-zinc-200">DuckDB + Vectorized Numba</span>
+            <span className="text-zinc-200">DuckDB + Numba</span>
           </div>
         </div>
       </header>

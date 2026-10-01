@@ -62,6 +62,12 @@ Sell = CrossUnder(Trend, 0)
   const [stopLoss, setStopLoss] = useState<string>('4.5');
   const [takeProfit, setTakeProfit] = useState<string>('18.0');
   const [trailingStop, setTrailingStop] = useState<string>('');
+  const [compounding, setCompounding] = useState<boolean>(true);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState<boolean>(false);
+  const [enablePartialTP, setEnablePartialTP] = useState<boolean>(false);
+  const [partialTP, setPartialTP] = useState<string>('15.0');
+  const [partialRatio, setPartialRatio] = useState<number>(50);
+  const [breakevenOnPartial, setBreakevenOnPartial] = useState<boolean>(true);
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResponse | null>(null);
@@ -138,6 +144,7 @@ Sell = Close < LLV(Low, 10).shift(1)
     if (p.trailing_stop_pct !== null && p.trailing_stop_pct !== undefined) setTrailingStop(String(p.trailing_stop_pct));
     else setTrailingStop('');
     if (p.max_positions) setMaxPositions(p.max_positions);
+    if (p.compounding !== undefined && p.compounding !== null) setCompounding(p.compounding);
   };
 
   // Fetch preset whenever strategy or universe changes
@@ -205,6 +212,7 @@ Sell = Close < LLV(Low, 10).shift(1)
           target_metric: optMetric,
           initial_capital: initialCapital,
           execution_timing: executionTiming,
+          compounding: compounding,
           param_ranges: optRanges,
           start_date: startDate
         })
@@ -314,6 +322,7 @@ Sell = Close < LLV(Low, 10).shift(1)
           take_profit_pct: takeProfit ? parseFloat(takeProfit) : null,
           trailing_stop_pct: trailingStop ? parseFloat(trailingStop) : null,
           max_positions: maxPositions,
+          compounding: compounding,
           best_metric_name: 'manual',
           best_metric_value: result?.metrics.sharpe_ratio ?? 0,
           total_trades: result?.metrics.total_trades ?? 0,
@@ -360,6 +369,10 @@ Sell = Close < LLV(Low, 10).shift(1)
           slippage_pct: 0.05,
           brokerage_pct: 0.10,
           execution_timing: executionTiming,
+          compounding: compounding,
+          partial_tp_pct: enablePartialTP && partialTP ? parseFloat(partialTP) : null,
+          partial_tp_ratio: partialRatio,
+          breakeven_on_partial: enablePartialTP && breakevenOnPartial,
           start_date: startDate
         })
       });
@@ -594,6 +607,49 @@ Sell = Close < LLV(Low, 10).shift(1)
             </div>
           )}
 
+          {/* Capital Allocation & Compounding Model Toggle */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] text-zinc-400 font-medium flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-purple-400" /> Capital Allocation Model
+              </label>
+              <span className="text-[10px] text-zinc-500 font-mono">
+                {compounding ? 'Reinvest Profits' : 'Fixed Sizing'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-[#0d1117] border border-zinc-800 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setCompounding(true)}
+                className={`py-1.5 px-2 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                  compounding
+                    ? 'bg-purple-950 text-purple-300 border border-purple-600/70 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Dynamic Equity: Reinvests profits so trade sizing scales proportionally with portfolio growth (Industry Standard)"
+              >
+                <span>🚀</span> Compounding (% Equity)
+              </button>
+              <button
+                type="button"
+                onClick={() => setCompounding(false)}
+                className={`py-1.5 px-2 rounded text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                  !compounding
+                    ? 'bg-zinc-800 text-zinc-200 border border-zinc-600/70 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Fixed Capital: Sizing remains fixed to initial capital throughout (Tests raw strategy edge)"
+              >
+                <span>🛡️</span> Fixed Capital (Linear)
+              </button>
+            </div>
+            <div className="text-[10px] text-zinc-500 mt-1">
+              {compounding 
+                ? 'Dynamic: Each trade sizes to % of current equity (reinvests profits & scales down on drawdowns)' 
+                : 'Linear: Each trade sizes strictly to % of initial capital (profits sit as idle cash reserve)'}
+            </div>
+          </div>
+
           {/* Capital & Stops Grid */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             <div>
@@ -606,7 +662,12 @@ Sell = Close < LLV(Low, 10).shift(1)
               />
             </div>
             <div>
-              <label className="text-[10px] text-zinc-400">Risk / Trade %</label>
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] text-zinc-400">Risk / Trade %</label>
+                <span className="text-[9px] text-zinc-500 font-mono">
+                  {compounding ? '~% of Equity' : `₹${Math.round(initialCapital * (riskPerTrade / 100)).toLocaleString()}`}
+                </span>
+              </div>
               <input
                 type="number"
                 value={riskPerTrade}
@@ -653,6 +714,87 @@ Sell = Close < LLV(Low, 10).shift(1)
                 className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono"
               />
             </div>
+          </div>
+
+          {/* Advanced Exit & Runner Mode Accordion */}
+          <div className="border border-zinc-800/80 rounded-lg overflow-hidden bg-[#0d1117]/80">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
+              className="w-full flex items-center justify-between p-2 text-[11px] font-semibold text-zinc-300 hover:text-white transition-colors bg-zinc-900/50"
+            >
+              <div className="flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Advanced: Scale-Out & Runner Mode</span>
+                {enablePartialTP && (
+                  <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-950 border border-amber-700/60 text-amber-300 font-mono">
+                    Active
+                  </span>
+                )}
+              </div>
+              <ChevronRight className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${showAdvancedOptions ? 'rotate-90' : ''}`} />
+            </button>
+
+            {showAdvancedOptions && (
+              <div className="p-2.5 pt-2 space-y-2 border-t border-zinc-800/80 bg-black/30 text-xs">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-zinc-300 font-medium flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enablePartialTP}
+                      onChange={e => setEnablePartialTP(e.target.checked)}
+                      className="rounded border-zinc-700 text-amber-500 focus:ring-amber-500 bg-zinc-800"
+                    />
+                    <span>Partial Take Profit (Scale-Out)</span>
+                  </label>
+                  <span className="text-[10px] text-zinc-500 font-mono">Don't Cap Winners</span>
+                </div>
+
+                {enablePartialTP && (
+                  <div className="space-y-2 pt-1 border-t border-zinc-800/50">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-zinc-400">Book Profit At %</label>
+                        <input
+                          type="text"
+                          value={partialTP}
+                          onChange={e => setPartialTP(e.target.value)}
+                          placeholder="e.g. 15.0"
+                          className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-zinc-400">Scale-Out Share</label>
+                        <select
+                          value={partialRatio}
+                          onChange={e => setPartialRatio(Number(e.target.value))}
+                          className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-xs"
+                        >
+                          <option value={33}>33% (1/3rd)</option>
+                          <option value={50}>50% (Half)</option>
+                          <option value={66}>66% (2/3rd)</option>
+                          <option value={75}>75% (3/4th)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-[10px] text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={breakevenOnPartial}
+                        onChange={e => setBreakevenOnPartial(e.target.checked)}
+                        className="rounded border-zinc-700 text-emerald-500 focus:ring-emerald-500 bg-zinc-800"
+                      />
+                      <span>Move Stop Loss to Breakeven (Risk-Free Runner)</span>
+                    </label>
+
+                    <div className="p-2 rounded bg-amber-950/30 border border-amber-900/40 text-[10px] text-amber-200/90 leading-tight">
+                      💡 <strong>Outlier Rule:</strong> Secures {partialRatio}% profit at +{partialTP}%, moves SL to entry price, and lets the remaining runner ride the trend signal to capture big winners.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Optimization & Preset Action Buttons */}
@@ -715,6 +857,20 @@ Sell = Close < LLV(Low, 10).shift(1)
                   ? '🌅 Filled at Next Day Open (9:15 AM - Zero Lookahead)' 
                   : '🕒 Filled at Same Day Close (3:20 PM - MOC Order)'}
               </span>
+              <span className={`px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 ${
+                result.compounding !== false
+                  ? 'bg-purple-950/80 border-purple-600/70 text-purple-300'
+                  : 'bg-zinc-800/80 border-zinc-600/70 text-zinc-300'
+              }`}>
+                {result.compounding !== false 
+                  ? '🚀 Compounding (% Equity)' 
+                  : '🛡️ Fixed Capital (Linear)'}
+              </span>
+              {result.partial_tp_pct && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 bg-amber-950/80 border-amber-600/70 text-amber-300">
+                  ⚡ Scale-Out: {result.partial_tp_ratio ?? 50}% @ +{result.partial_tp_pct}%
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <span className="text-[11px] text-zinc-400 font-mono">
@@ -910,8 +1066,23 @@ Sell = Close < LLV(Low, 10).shift(1)
                       <td className={`p-2.5 font-semibold ${t.return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
                         {t.return_pct >= 0 ? '+' : ''}{t.return_pct.toFixed(2)}%
                       </td>
-                      <td className="p-2.5">{t.holding_days}d</td>
-                      <td className="p-2.5 text-zinc-400 text-[11px]">{t.exit_reason}</td>
+                      <td className="p-2.5 text-[11px]">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                          t.exit_reason?.includes('Partial')
+                            ? 'bg-amber-950/80 text-amber-300 border border-amber-800/60'
+                            : t.exit_reason?.includes('Breakeven')
+                            ? 'bg-blue-950/80 text-blue-300 border border-blue-800/60'
+                            : t.exit_reason?.includes('Runner')
+                            ? 'bg-purple-950/80 text-purple-300 border border-purple-800/60'
+                            : t.exit_reason?.includes('Take Profit')
+                            ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                            : t.exit_reason?.includes('Stop Loss')
+                            ? 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
+                            : 'text-zinc-400'
+                        }`}>
+                          {t.exit_reason}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                   {filteredTrades.length === 0 && (
