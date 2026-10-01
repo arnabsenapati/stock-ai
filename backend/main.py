@@ -59,6 +59,9 @@ class BacktestRequest(BaseModel):
     partial_tp_pct: Optional[float] = None
     partial_tp_ratio: float = 50.0
     breakeven_on_partial: bool = False
+    regime_filter: bool = False
+    regime_index_symbol: str = "^NSEI"
+    regime_rule: str = "sma_200"
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
@@ -96,6 +99,8 @@ class StrategyPresetSaveRequest(BaseModel):
     trailing_stop_pct: Optional[float] = None
     max_positions: int = 10
     compounding: Optional[bool] = True
+    regime_filter: Optional[bool] = False
+    regime_rule: Optional[str] = "sma_200"
     best_metric_name: Optional[str] = "sharpe_ratio"
     best_metric_value: Optional[float] = 0.0
     total_trades: Optional[int] = 0
@@ -340,6 +345,9 @@ def run_backtest(req: BacktestRequest):
     engine.partial_tp_pct = req.partial_tp_pct
     engine.partial_tp_ratio = req.partial_tp_ratio
     engine.breakeven_on_partial = req.breakeven_on_partial
+    engine.regime_filter = req.regime_filter
+    engine.regime_index_symbol = req.regime_index_symbol
+    engine.regime_rule = req.regime_rule
 
     try:
         if req.mode == "single":

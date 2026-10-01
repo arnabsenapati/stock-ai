@@ -83,6 +83,11 @@ export interface BacktestMetrics {
   avg_win_pct: number;
   avg_loss_pct: number;
   avg_holding_days: number;
+  regime_filter_enabled?: boolean;
+  regime_rule?: string;
+  regime_index_symbol?: string;
+  regime_blocked_days?: number;
+  regime_filtered_entries?: number;
 }
 
 export interface TradeItem {
@@ -107,6 +112,7 @@ export interface EquityPoint {
   cash: number;
   invested: number;
   open_positions: number;
+  regime?: 'BULL' | 'BEAR';
 }
 
 export interface MonthlyReturnItem {
@@ -121,6 +127,9 @@ export interface BacktestResponse {
   partial_tp_pct?: number | null;
   partial_tp_ratio?: number;
   breakeven_on_partial?: boolean;
+  regime_filter?: boolean;
+  regime_rule?: string;
+  regime_index_symbol?: string;
   metrics: BacktestMetrics;
   equity_curve: EquityPoint[];
   trades: TradeItem[];
@@ -209,6 +218,8 @@ export interface StrategyBasketProfile {
   trailing_stop_pct: number | null;
   max_positions: number;
   compounding?: boolean;
+  regime_filter?: boolean;
+  regime_rule?: string;
   best_metric_name: string;
   best_metric_value: number;
   total_trades: number;

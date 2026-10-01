@@ -39,6 +39,8 @@ class DatabaseManager:
                     trailing_stop_pct DOUBLE,
                     max_positions INT,
                     compounding BOOLEAN DEFAULT TRUE,
+                    regime_filter BOOLEAN DEFAULT FALSE,
+                    regime_rule VARCHAR DEFAULT 'sma_200',
                     best_metric_name VARCHAR,
                     best_metric_value DOUBLE,
                     total_trades INT,
@@ -53,6 +55,14 @@ class DatabaseManager:
             """)
             try:
                 con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN compounding BOOLEAN DEFAULT TRUE;")
+            except Exception:
+                pass
+            try:
+                con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN regime_filter BOOLEAN DEFAULT FALSE;")
+            except Exception:
+                pass
+            try:
+                con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN regime_rule VARCHAR DEFAULT 'sma_200';")
             except Exception:
                 pass
 
@@ -175,10 +185,10 @@ class DatabaseManager:
                 INSERT OR REPLACE INTO strategy_basket_profiles (
                     strategy_name, universe, initial_capital, risk_per_trade_pct,
                     stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
-                    compounding,
+                    compounding, regime_filter, regime_rule,
                     best_metric_name, best_metric_value, total_trades, win_rate,
                     total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """, [
                 profile.get("strategy_name"),
                 profile.get("universe"),
@@ -189,6 +199,8 @@ class DatabaseManager:
                 float(profile["trailing_stop_pct"]) if profile.get("trailing_stop_pct") is not None else None,
                 int(profile.get("max_positions", 10)),
                 bool(profile.get("compounding", True)),
+                bool(profile.get("regime_filter", False)),
+                str(profile.get("regime_rule", "sma_200")),
                 profile.get("best_metric_name", "sharpe_ratio"),
                 float(profile.get("best_metric_value", 0.0)),
                 int(profile.get("total_trades", 0)),
@@ -206,7 +218,7 @@ class DatabaseManager:
                 SELECT 
                     strategy_name, universe, initial_capital, risk_per_trade_pct,
                     stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
-                    compounding,
+                    compounding, regime_filter, regime_rule,
                     best_metric_name, best_metric_value, total_trades, win_rate,
                     total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct,
                     strftime(updated_at, '%Y-%m-%d %H:%M:%S') as updated_at
@@ -227,15 +239,17 @@ class DatabaseManager:
                 "trailing_stop_pct": res[6],
                 "max_positions": res[7],
                 "compounding": bool(res[8]) if res[8] is not None else True,
-                "best_metric_name": res[9],
-                "best_metric_value": res[10],
-                "total_trades": res[11],
-                "win_rate": res[12],
-                "total_return_pct": res[13],
-                "max_drawdown_pct": res[14],
-                "sharpe_ratio": res[15],
-                "cagr_pct": res[16],
-                "updated_at": res[17]
+                "regime_filter": bool(res[9]) if res[9] is not None else False,
+                "regime_rule": res[10] or "sma_200",
+                "best_metric_name": res[11],
+                "best_metric_value": res[12],
+                "total_trades": res[13],
+                "win_rate": res[14],
+                "total_return_pct": res[15],
+                "max_drawdown_pct": res[16],
+                "sharpe_ratio": res[17],
+                "cagr_pct": res[18],
+                "updated_at": res[19]
             }
 
     def list_strategy_basket_profiles(self) -> List[Dict[str, Any]]:
@@ -245,7 +259,7 @@ class DatabaseManager:
                 SELECT 
                     strategy_name, universe, initial_capital, risk_per_trade_pct,
                     stop_loss_pct, take_profit_pct, trailing_stop_pct, max_positions,
-                    compounding,
+                    compounding, regime_filter, regime_rule,
                     best_metric_name, best_metric_value, total_trades, win_rate,
                     total_return_pct, max_drawdown_pct, sharpe_ratio, cagr_pct,
                     strftime(updated_at, '%Y-%m-%d %H:%M:%S') as updated_at
@@ -263,15 +277,17 @@ class DatabaseManager:
                 "trailing_stop_pct": r[6],
                 "max_positions": r[7],
                 "compounding": bool(r[8]) if r[8] is not None else True,
-                "best_metric_name": r[9],
-                "best_metric_value": r[10],
-                "total_trades": r[11],
-                "win_rate": r[12],
-                "total_return_pct": r[13],
-                "max_drawdown_pct": r[14],
-                "sharpe_ratio": r[15],
-                "cagr_pct": r[16],
-                "updated_at": r[17]
+                "regime_filter": bool(r[9]) if r[9] is not None else False,
+                "regime_rule": r[10] or "sma_200",
+                "best_metric_name": r[11],
+                "best_metric_value": r[12],
+                "total_trades": r[13],
+                "win_rate": r[14],
+                "total_return_pct": r[15],
+                "max_drawdown_pct": r[16],
+                "sharpe_ratio": r[17],
+                "cagr_pct": r[18],
+                "updated_at": r[19]
             } for r in rows]
 
 db = DatabaseManager()

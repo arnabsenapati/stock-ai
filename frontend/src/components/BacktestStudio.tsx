@@ -25,7 +25,8 @@ import {
   X,
   Zap,
   Layers,
-  ChevronRight
+  ChevronRight,
+  ShieldCheck
 } from 'lucide-react';
 import { BacktestResponse, OptimizationStatusResponse, StrategyBasketProfile } from '../types';
 
@@ -68,6 +69,10 @@ Sell = CrossUnder(Trend, 0)
   const [partialTP, setPartialTP] = useState<string>('15.0');
   const [partialRatio, setPartialRatio] = useState<number>(50);
   const [breakevenOnPartial, setBreakevenOnPartial] = useState<boolean>(true);
+  const [showRegimeOptions, setShowRegimeOptions] = useState<boolean>(false);
+  const [enableRegimeFilter, setEnableRegimeFilter] = useState<boolean>(false);
+  const [regimeRule, setRegimeRule] = useState<string>('sma_200');
+  const [regimeIndexSymbol, setRegimeIndexSymbol] = useState<string>('^NSEI');
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<BacktestResponse | null>(null);
@@ -145,6 +150,8 @@ Sell = Close < LLV(Low, 10).shift(1)
     else setTrailingStop('');
     if (p.max_positions) setMaxPositions(p.max_positions);
     if (p.compounding !== undefined && p.compounding !== null) setCompounding(p.compounding);
+    if (p.regime_filter !== undefined && p.regime_filter !== null) setEnableRegimeFilter(p.regime_filter);
+    if (p.regime_rule) setRegimeRule(p.regime_rule);
   };
 
   // Fetch preset whenever strategy or universe changes
@@ -323,6 +330,8 @@ Sell = Close < LLV(Low, 10).shift(1)
           trailing_stop_pct: trailingStop ? parseFloat(trailingStop) : null,
           max_positions: maxPositions,
           compounding: compounding,
+          regime_filter: enableRegimeFilter,
+          regime_rule: regimeRule,
           best_metric_name: 'manual',
           best_metric_value: result?.metrics.sharpe_ratio ?? 0,
           total_trades: result?.metrics.total_trades ?? 0,
@@ -373,6 +382,9 @@ Sell = Close < LLV(Low, 10).shift(1)
           partial_tp_pct: enablePartialTP && partialTP ? parseFloat(partialTP) : null,
           partial_tp_ratio: partialRatio,
           breakeven_on_partial: enablePartialTP && breakevenOnPartial,
+          regime_filter: enableRegimeFilter,
+          regime_rule: regimeRule,
+          regime_index_symbol: regimeIndexSymbol,
           start_date: startDate
         })
       });
@@ -797,6 +809,76 @@ Sell = Close < LLV(Low, 10).shift(1)
             )}
           </div>
 
+          {/* Market Regime Filter (Index Cash Protection) Accordion */}
+          <div className="border border-zinc-800/80 rounded-lg overflow-hidden bg-[#0d1117]/80">
+            <button
+              type="button"
+              onClick={() => setShowRegimeOptions(!showRegimeOptions)}
+              className="w-full flex items-center justify-between p-2 text-[11px] font-semibold text-zinc-300 hover:text-white transition-colors bg-zinc-900/50"
+            >
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span>Market Regime: Index Cash Protection</span>
+                {enableRegimeFilter && (
+                  <span className="px-1.5 py-0.2 rounded text-[9px] bg-cyan-950 border border-cyan-700/60 text-cyan-300 font-mono">
+                    Protected
+                  </span>
+                )}
+              </div>
+              <ChevronRight className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${showRegimeOptions ? 'rotate-90' : ''}`} />
+            </button>
+
+            {showRegimeOptions && (
+              <div className="p-2.5 pt-2 space-y-2 border-t border-zinc-800/80 bg-black/30 text-xs">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] text-zinc-300 font-medium flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={enableRegimeFilter}
+                      onChange={e => setEnableRegimeFilter(e.target.checked)}
+                      className="rounded border-zinc-700 text-cyan-500 focus:ring-cyan-500 bg-zinc-800"
+                    />
+                    <span>Enable Index Cash Protection</span>
+                  </label>
+                  <span className="text-[10px] text-zinc-500 font-mono">Avoid Bear Breakouts</span>
+                </div>
+
+                {enableRegimeFilter && (
+                  <div className="space-y-2 pt-1 border-t border-zinc-800/50">
+                    <div>
+                      <label className="text-[10px] text-zinc-400">Benchmark Index</label>
+                      <input
+                        type="text"
+                        value={regimeIndexSymbol}
+                        onChange={e => setRegimeIndexSymbol(e.target.value.toUpperCase())}
+                        placeholder="^NSEI (Nifty 50)"
+                        className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-zinc-400">Regime Defense Rule</label>
+                      <select
+                        value={regimeRule}
+                        onChange={e => setRegimeRule(e.target.value)}
+                        className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-xs"
+                      >
+                        <option value="sma_200">Nifty 50 &gt; 200 SMA (Institutional Macro Bull - Max Profit)</option>
+                        <option value="sma_50">Nifty 50 &gt; 50 SMA (Tactical Trend - Lowest Drawdown)</option>
+                        <option value="sma_100">Nifty 50 &gt; 100 SMA (Intermediate Macro Trend)</option>
+                        <option value="supertrend">Nifty 50 SuperTrend(10, 3) Bullish</option>
+                      </select>
+                    </div>
+
+                    <div className="p-2 rounded bg-cyan-950/30 border border-cyan-900/40 text-[10px] text-cyan-200/90 leading-tight">
+                      🛡️ <strong>Cash Defense:</strong> Vetoes new buy entries whenever {regimeIndexSymbol} is below its {regimeRule.toUpperCase().replace('_', ' ')}. Keeps portfolio safely in cash during broad market corrections, cutting out false breakouts and boosting win rate.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Optimization & Preset Action Buttons */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             <button
@@ -871,6 +953,11 @@ Sell = Close < LLV(Low, 10).shift(1)
                   ⚡ Scale-Out: {result.partial_tp_ratio ?? 50}% @ +{result.partial_tp_pct}%
                 </span>
               )}
+              {result.regime_filter && (
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 bg-cyan-950/80 border-cyan-600/70 text-cyan-300">
+                  🛡️ Cash Defense: {result.regime_rule?.toUpperCase().replace('_', ' ')} ({result.metrics.regime_blocked_days ?? 0}d Cash / {result.metrics.regime_filtered_entries ?? 0} Filtered)
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <span className="text-[11px] text-zinc-400 font-mono">
@@ -885,6 +972,32 @@ Sell = Close < LLV(Low, 10).shift(1)
               </button>
             </div>
           </div>
+
+          {/* Regime Defense Informational Banner */}
+          {result.regime_filter && (
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-cyan-950/30 border border-cyan-800/50 text-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xl">🛡️</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-cyan-200">Market Regime Cash Protection Active</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-900/60 border border-cyan-600/60 text-cyan-200">
+                      {result.regime_index_symbol ?? '^NSEI'} &gt; {result.regime_rule?.toUpperCase().replace('_', ' ')}
+                    </span>
+                  </div>
+                  <p className="text-zinc-400 text-[11px] mt-0.5 leading-relaxed">
+                    Defended capital by staying in cash for <strong>{result.metrics.regime_blocked_days ?? 0} trading days</strong> and filtering out <strong>{result.metrics.regime_filtered_entries ?? 0} false breakout entries</strong> during broad index downtrends.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="text-right">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Win Rate Under Defense</span>
+                  <span className="text-sm font-bold font-mono text-cyan-300">{result.metrics.win_rate_pct}%</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-3">

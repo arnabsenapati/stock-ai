@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from backend.core.database import db
 from backend.backtester.strategy_dsl import StrategyEvaluator
+from backend.analytics.indicators import ta
 
 class BacktestEngine:
     def __init__(self,
@@ -19,7 +20,10 @@ class BacktestEngine:
                  compounding: bool = True,
                  partial_tp_pct: Optional[float] = None,
                  partial_tp_ratio: float = 50.0,
-                 breakeven_on_partial: bool = False):
+                 breakeven_on_partial: bool = False,
+                 regime_filter: bool = False,
+                 regime_index_symbol: str = "^NSEI",
+                 regime_rule: str = "sma_200"):
         self.initial_capital = initial_capital
         self.max_positions = max_positions
         self.risk_per_trade_pct = risk_per_trade_pct
@@ -33,6 +37,49 @@ class BacktestEngine:
         self.partial_tp_pct = partial_tp_pct
         self.partial_tp_ratio = partial_tp_ratio
         self.breakeven_on_partial = breakeven_on_partial
+        self.regime_filter = regime_filter
+        self.regime_index_symbol = regime_index_symbol.upper() if regime_index_symbol else "^NSEI"
+        self.regime_rule = regime_rule or "sma_200"
+
+    def _get_regime_map(self) -> Dict[Any, bool]:
+        """
+        Builds date -> bool mapping for the benchmark index.
+        True = Bullish regime (normal entries permitted)
+        False = Bearish regime (cash protection mode: no new buys permitted)
+        """
+        if not self.regime_filter:
+            return {}
+        try:
+            index_df = db.get_symbol_data(self.regime_index_symbol)
+            if index_df.empty:
+                index_df = db.get_symbol_data("^NSEI")
+            if index_df.empty or len(index_df) < 20:
+                return {}
+
+            index_df = index_df.sort_values('date').reset_index(drop=True)
+            if self.regime_rule == "sma_50":
+                ma = ta.sma(index_df['close'], 50)
+                bullish_series = (index_df['close'] > ma) if ma is not None else pd.Series(True, index=index_df.index)
+            elif self.regime_rule == "sma_100":
+                ma = ta.sma(index_df['close'], 100)
+                bullish_series = (index_df['close'] > ma) if ma is not None else pd.Series(True, index=index_df.index)
+            elif self.regime_rule == "sma_200":
+                ma = ta.sma(index_df['close'], 200)
+                bullish_series = (index_df['close'] > ma) if ma is not None else pd.Series(True, index=index_df.index)
+            elif self.regime_rule == "supertrend":
+                st = ta.supertrend(index_df['high'], index_df['low'], index_df['close'], 10, 3.0)
+                bullish_series = (st['supertrend_trend'] > 0)
+            else:
+                bullish_series = pd.Series(True, index=index_df.index)
+
+            reg_map = {}
+            for d, b in zip(index_df['date'], bullish_series):
+                d_key = d.date() if hasattr(d, 'date') else pd.to_datetime(d).date()
+                reg_map[d_key] = bool(b) if pd.notnull(b) else True
+            return reg_map
+        except Exception as e:
+            print(f"Error computing market regime map: {e}")
+            return {}
 
     def run_single_stock(self, symbol: str, strategy_code: str, 
                          start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
@@ -94,8 +141,15 @@ class BacktestEngine:
         open_positions = {} # symbol -> {entry_date, entry_price, qty, highest_price}
         trades_log = []
         equity_curve = []
+        regime_map = self._get_regime_map() if self.regime_filter else {}
+        regime_blocked_days = 0
+        regime_filtered_entries = 0
 
         for current_date in all_dates:
+            is_bullish_regime = regime_map.get(current_date, True) if self.regime_filter else True
+            if not is_bullish_regime:
+                regime_blocked_days += 1
+
             # 1. Update open positions and check exits (Stop Loss, Take Profit, Trailing Stop, Sell Signal)
             symbols_to_close = []
             
@@ -233,11 +287,66 @@ class BacktestEngine:
             for sym in symbols_to_close:
                 del open_positions[sym]
 
-            # 2. Check for new buy entries
+            # 2. Check for new buy entries (Subject to Market Regime Defense)
             available_slots = self.max_positions - len(open_positions)
             min_cash_threshold = min(5000.0, self.initial_capital * 0.05)
-            if available_slots > 0 and cash >= min_cash_threshold:
-                candidate_buys = []
+            
+            if is_bullish_regime:
+                if available_slots > 0 and cash >= min_cash_threshold:
+                    candidate_buys = []
+                    for sym in symbol_dfs.keys():
+                        if sym in open_positions:
+                            continue
+                        sym_table = date_indexed[sym]
+                        if current_date in sym_table.index:
+                            bar = sym_table.loc[current_date]
+                            if bar.get('buy_signal', False):
+                                entry_px = bar['open'] if self.execution_timing == "next_open" else bar['close']
+                                candidate_buys.append((sym, entry_px))
+
+                    if candidate_buys:
+                        if self.compounding:
+                            # Dynamic equity sizing: cash + current market value of open positions
+                            current_invested = 0.0
+                            for open_sym, pos in open_positions.items():
+                                sym_t = date_indexed.get(open_sym)
+                                if sym_t is not None and current_date in sym_t.index:
+                                    px = sym_t.loc[current_date]['open'] if self.execution_timing == "next_open" else sym_t.loc[current_date]['close']
+                                else:
+                                    px = pos['entry_price']
+                                current_invested += px * pos['qty']
+                            base_capital = max(cash + current_invested, 0.0)
+                        else:
+                            base_capital = self.initial_capital
+
+                        target_budget = base_capital * (self.risk_per_trade_pct / 100.0)
+                        min_trade_budget = min(2000.0, self.initial_capital * 0.02)
+
+                        # Allocate capital among available candidates
+                        for sym, price in candidate_buys[:available_slots]:
+                            alloc_budget = min(cash, target_budget)
+                            if alloc_budget < min_trade_budget:
+                                break
+
+                            eff_entry_price = price * (1.0 + self.slippage_pct)
+                            qty = int(alloc_budget // eff_entry_price)
+                            if qty > 0:
+                                gross_cost = qty * eff_entry_price
+                                total_cost = gross_cost * (1.0 + self.brokerage_pct)
+                                if total_cost <= cash:
+                                    cash -= total_cost
+                                    open_positions[sym] = {
+                                        "entry_date": current_date,
+                                        "entry_price": eff_entry_price,
+                                        "qty": qty,
+                                        "initial_qty": qty,
+                                        "total_cost": total_cost,
+                                        "highest_price": eff_entry_price,
+                                        "partial_booked": False,
+                                        "be_active": False
+                                    }
+            else:
+                # Bearish Regime: Cash Protection Active -> Count blocked entries
                 for sym in symbol_dfs.keys():
                     if sym in open_positions:
                         continue
@@ -245,50 +354,7 @@ class BacktestEngine:
                     if current_date in sym_table.index:
                         bar = sym_table.loc[current_date]
                         if bar.get('buy_signal', False):
-                            entry_px = bar['open'] if self.execution_timing == "next_open" else bar['close']
-                            candidate_buys.append((sym, entry_px))
-
-                if candidate_buys:
-                    if self.compounding:
-                        # Dynamic equity sizing: cash + current market value of open positions
-                        current_invested = 0.0
-                        for open_sym, pos in open_positions.items():
-                            sym_t = date_indexed.get(open_sym)
-                            if sym_t is not None and current_date in sym_t.index:
-                                px = sym_t.loc[current_date]['open'] if self.execution_timing == "next_open" else sym_t.loc[current_date]['close']
-                            else:
-                                px = pos['entry_price']
-                            current_invested += px * pos['qty']
-                        base_capital = max(cash + current_invested, 0.0)
-                    else:
-                        base_capital = self.initial_capital
-
-                    target_budget = base_capital * (self.risk_per_trade_pct / 100.0)
-                    min_trade_budget = min(2000.0, self.initial_capital * 0.02)
-
-                    # Allocate capital among available candidates
-                    for sym, price in candidate_buys[:available_slots]:
-                        alloc_budget = min(cash, target_budget)
-                        if alloc_budget < min_trade_budget:
-                            break
-
-                        eff_entry_price = price * (1.0 + self.slippage_pct)
-                        qty = int(alloc_budget // eff_entry_price)
-                        if qty > 0:
-                            gross_cost = qty * eff_entry_price
-                            total_cost = gross_cost * (1.0 + self.brokerage_pct)
-                            if total_cost <= cash:
-                                cash -= total_cost
-                                open_positions[sym] = {
-                                    "entry_date": current_date,
-                                    "entry_price": eff_entry_price,
-                                    "qty": qty,
-                                    "initial_qty": qty,
-                                    "total_cost": total_cost,
-                                    "highest_price": eff_entry_price,
-                                    "partial_booked": False,
-                                    "be_active": False
-                                }
+                            regime_filtered_entries += 1
 
             # 3. Calculate portfolio equity at end of day
             invested_value = 0.0
@@ -303,11 +369,12 @@ class BacktestEngine:
                 "equity": round(total_equity, 2),
                 "cash": round(cash, 2),
                 "invested": round(invested_value, 2),
-                "open_positions": len(open_positions)
+                "open_positions": len(open_positions),
+                "regime": "BULL" if is_bullish_regime else "BEAR"
             })
 
         # Calculate performance statistics
-        metrics = self._calculate_metrics(equity_curve, trades_log)
+        metrics = self._calculate_metrics(equity_curve, trades_log, regime_blocked_days, regime_filtered_entries)
         monthly_matrix = self._calculate_monthly_returns(equity_curve)
 
         return {
@@ -316,13 +383,17 @@ class BacktestEngine:
             "partial_tp_pct": self.partial_tp_pct,
             "partial_tp_ratio": self.partial_tp_ratio,
             "breakeven_on_partial": self.breakeven_on_partial,
+            "regime_filter": self.regime_filter,
+            "regime_rule": self.regime_rule,
+            "regime_index_symbol": self.regime_index_symbol,
             "metrics": metrics,
             "equity_curve": equity_curve,
             "trades": trades_log,
             "monthly_returns": monthly_matrix
         }
 
-    def _calculate_metrics(self, equity_curve: List[Dict[str, Any]], trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _calculate_metrics(self, equity_curve: List[Dict[str, Any]], trades: List[Dict[str, Any]],
+                           regime_blocked_days: int = 0, regime_filtered_entries: int = 0) -> Dict[str, Any]:
         if not equity_curve:
             return {}
 
@@ -391,7 +462,12 @@ class BacktestEngine:
             "avg_return_pct": round(float(avg_return_pct), 2),
             "avg_win_pct": round(float(avg_win_pct), 2),
             "avg_loss_pct": round(float(avg_loss_pct), 2),
-            "avg_holding_days": round(float(avg_holding_days), 1)
+            "avg_holding_days": round(float(avg_holding_days), 1),
+            "regime_filter_enabled": self.regime_filter,
+            "regime_rule": self.regime_rule if self.regime_filter else None,
+            "regime_index_symbol": self.regime_index_symbol if self.regime_filter else None,
+            "regime_blocked_days": int(regime_blocked_days) if self.regime_filter else 0,
+            "regime_filtered_entries": int(regime_filtered_entries) if self.regime_filter else 0
         }
 
     def _calculate_monthly_returns(self, equity_curve: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
