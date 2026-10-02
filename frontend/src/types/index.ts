@@ -206,6 +206,9 @@ export interface OptimizationStatusResponse {
   error_message: string | null;
   started_at: string | null;
   last_updated_at: string | null;
+  regime_filter?: boolean;
+  regime_rule?: string;
+  regime_index_symbol?: string;
 }
 
 export interface StrategyBasketProfile {
@@ -229,4 +232,27 @@ export interface StrategyBasketProfile {
   sharpe_ratio: number;
   cagr_pct: number;
   updated_at: string;
+}
+
+export interface SyncStatusResponse {
+  is_syncing: boolean;
+  is_up_to_date: boolean;
+  days_behind: number;
+  latest_expected_trading_day: string;
+  current_db_date: string | null;
+  morning_schedule_enabled: boolean;
+  morning_schedule_time: string;
+  auto_sync_on_open: boolean;
+  last_sync_timestamp: string | null;
+  last_sync_status: string;
+  last_sync_summary: string | null;
+  next_run_estimate: string;
+  market_summary: {
+    total_rows: number;
+    total_symbols: number;
+    min_date: string | null;
+    max_date: string | null;
+  };
+  symbols_behind_count: number;
+  symbols_behind: string[];
 }

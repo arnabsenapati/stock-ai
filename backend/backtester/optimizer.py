@@ -45,13 +45,23 @@ class OptunaStrategyOptimizer:
         self.error_message: Optional[str] = None
         self.started_at: Optional[str] = None
         self.last_updated_at: Optional[str] = None
+        self.regime_filter: bool = False
+        self.regime_index_symbol: str = "^NSEI"
+        self.regime_rule: str = "sma_200"
+        self.compounding: bool = True
+        self.initial_capital: float = 100000.0
+        self.execution_timing: str = "next_open"
+        self._regime_map: Optional[Dict[Any, bool]] = None
         
         # Cache of prepared symbol data for rapid portfolio evaluations
         self._symbol_data_cache: Dict[str, pd.DataFrame] = {}
 
-    def get_study_name(self, strategy_name: str, universe: str) -> str:
+    def get_study_name(self, strategy_name: str, universe: str, regime_filter: bool = False, regime_rule: str = "sma_200") -> str:
         s_key = sanitize_name(strategy_name)
         u_key = sanitize_name(universe)
+        if regime_filter:
+            r_key = sanitize_name(regime_rule or "sma_200")
+            return f"{s_key}__{u_key}__regime_{r_key}"
         return f"{s_key}__{u_key}"
 
     def get_storage_url(self) -> str:
@@ -59,12 +69,13 @@ class OptunaStrategyOptimizer:
         db_path = OPTUNA_DB_PATH.as_posix()
         return f"sqlite:///{db_path}"
 
-    def get_status(self, strategy_name: Optional[str] = None, universe: Optional[str] = None) -> Dict[str, Any]:
+    def get_status(self, strategy_name: Optional[str] = None, universe: Optional[str] = None,
+                   regime_filter: Optional[bool] = None, regime_rule: Optional[str] = None) -> Dict[str, Any]:
         """Returns the live or persisted state of the optimization engine"""
         with self._lock:
             # If actively running, report live status
             if self.status == "running":
-                study_name = self.get_study_name(self.strategy_name, self.universe) if self.strategy_name else ""
+                study_name = self.get_study_name(self.strategy_name, self.universe, self.regime_filter, self.regime_rule) if self.strategy_name else ""
                 return {
                     "status": self.status,
                     "strategy_name": self.strategy_name,
@@ -80,14 +91,19 @@ class OptunaStrategyOptimizer:
                     "recent_trials": self.recent_trials[-15:],
                     "error_message": self.error_message,
                     "started_at": self.started_at,
-                    "last_updated_at": self.last_updated_at
+                    "last_updated_at": self.last_updated_at,
+                    "regime_filter": self.regime_filter,
+                    "regime_rule": self.regime_rule,
+                    "regime_index_symbol": self.regime_index_symbol
                 }
 
             # Check if there is a saved study in SQLite for the specified strategy & universe
             target_strat = strategy_name or self.strategy_name
             target_univ = universe or self.universe
+            target_regime = regime_filter if regime_filter is not None else self.regime_filter
+            target_rule = regime_rule or self.regime_rule or "sma_200"
             if target_strat and target_univ:
-                study_name = self.get_study_name(target_strat, target_univ)
+                study_name = self.get_study_name(target_strat, target_univ, target_regime, target_rule)
                 storage_url = self.get_storage_url()
                 try:
                     study = optuna.load_study(study_name=study_name, storage=storage_url)
@@ -95,6 +111,8 @@ class OptunaStrategyOptimizer:
                     if n_trials > 0:
                         self.strategy_name = target_strat
                         self.universe = target_univ
+                        self.regime_filter = target_regime
+                        self.regime_rule = target_rule
                         self.completed_trials = n_trials
                         if study.best_trial:
                             self.best_value = study.best_value
@@ -127,16 +145,19 @@ class OptunaStrategyOptimizer:
                             "recent_trials": recent,
                             "error_message": None,
                             "started_at": self.started_at,
-                            "last_updated_at": self.last_updated_at
+                            "last_updated_at": self.last_updated_at,
+                            "regime_filter": target_regime,
+                            "regime_rule": target_rule,
+                            "regime_index_symbol": study.user_attrs.get("regime_index_symbol", "^NSEI")
                         }
                 except Exception:
                     pass
 
-            study_name = self.get_study_name(self.strategy_name, self.universe) if self.strategy_name else ""
+            study_name = self.get_study_name(target_strat or self.strategy_name, target_univ or self.universe, target_regime, target_rule) if (target_strat or self.strategy_name) else ""
             return {
                 "status": self.status,
-                "strategy_name": self.strategy_name,
-                "universe": self.universe,
+                "strategy_name": target_strat or self.strategy_name,
+                "universe": target_univ or self.universe,
                 "study_name": study_name,
                 "target_metric": self.target_metric,
                 "target_trials": self.target_trials,
@@ -148,7 +169,10 @@ class OptunaStrategyOptimizer:
                 "recent_trials": self.recent_trials[-15:],
                 "error_message": self.error_message,
                 "started_at": self.started_at,
-                "last_updated_at": self.last_updated_at
+                "last_updated_at": self.last_updated_at,
+                "regime_filter": target_regime,
+                "regime_rule": target_rule,
+                "regime_index_symbol": self.regime_index_symbol
             }
 
     def prepare_data(self, universe: str, strategy_code: str, execution_timing: str = "next_open",
@@ -194,6 +218,9 @@ class OptunaStrategyOptimizer:
                            initial_capital: float = 100000.0,
                            execution_timing: str = "next_open",
                            compounding: bool = True,
+                           regime_filter: bool = False,
+                           regime_index_symbol: str = "^NSEI",
+                           regime_rule: str = "sma_200",
                            param_ranges: Optional[Dict[str, Any]] = None,
                            start_date: Optional[str] = None,
                            end_date: Optional[str] = None):
@@ -207,12 +234,18 @@ class OptunaStrategyOptimizer:
             self.strategy_code = strategy_code
             self.target_metric = target_metric
             self.target_trials = target_trials
+            self.initial_capital = initial_capital
+            self.execution_timing = execution_timing
+            self.compounding = compounding
+            self.regime_filter = regime_filter
+            self.regime_index_symbol = regime_index_symbol or "^NSEI"
+            self.regime_rule = regime_rule or "sma_200"
             self.error_message = None
             self._pause_requested = False
             self._stop_requested = False
             self.started_at = time.strftime('%Y-%m-%d %H:%M:%S')
 
-        # Precompute signal cache
+        # Precompute signal cache and regime map
         try:
             self._symbol_data_cache = self.prepare_data(
                 universe=universe,
@@ -221,6 +254,15 @@ class OptunaStrategyOptimizer:
                 start_date=start_date,
                 end_date=end_date
             )
+            if self.regime_filter:
+                temp_engine = BacktestEngine(
+                    regime_filter=True,
+                    regime_index_symbol=self.regime_index_symbol,
+                    regime_rule=self.regime_rule
+                )
+                self._regime_map = temp_engine._get_regime_map()
+            else:
+                self._regime_map = {}
         except Exception as e:
             with self._lock:
                 self.status = "error"
@@ -231,7 +273,8 @@ class OptunaStrategyOptimizer:
         self.status = "running"
         self._thread = threading.Thread(
             target=self._run_optimization_loop,
-            args=(strategy_name, universe, initial_capital, execution_timing, compounding, param_ranges or {}),
+            args=(strategy_name, universe, initial_capital, execution_timing, compounding,
+                  self.regime_filter, self.regime_index_symbol, self.regime_rule, param_ranges or {}),
             daemon=True
         )
         self._thread.start()
@@ -245,11 +288,17 @@ class OptunaStrategyOptimizer:
             return {"message": "Pause requested. Optimization will pause after the current trial commits."}
 
     def resume_optimization(self, strategy_name: Optional[str] = None, universe: Optional[str] = None,
-                            strategy_code: Optional[str] = None, execution_timing: str = "next_open"):
+                            strategy_code: Optional[str] = None, execution_timing: str = "next_open",
+                            regime_filter: Optional[bool] = None, regime_index_symbol: Optional[str] = None,
+                            regime_rule: Optional[str] = None):
         """Resumes a paused optimization task, reloading data cache if necessary"""
         target_strat = strategy_name or self.strategy_name
         target_univ = universe or self.universe
         target_code = strategy_code or self.strategy_code
+        target_regime = regime_filter if regime_filter is not None else self.regime_filter
+        target_rule = regime_rule or self.regime_rule or "sma_200"
+        target_index = regime_index_symbol or self.regime_index_symbol or "^NSEI"
+
         if not target_strat or not target_univ:
             raise RuntimeError("Strategy and Universe must be specified to resume optimization.")
 
@@ -259,17 +308,29 @@ class OptunaStrategyOptimizer:
                 raise RuntimeError("Strategy formula code is required to compute stock signals.")
             self._symbol_data_cache = self.prepare_data(target_univ, target_code, execution_timing)
 
+        if target_regime and not self._regime_map:
+            temp_engine = BacktestEngine(
+                regime_filter=True,
+                regime_index_symbol=target_index,
+                regime_rule=target_rule
+            )
+            self._regime_map = temp_engine._get_regime_map()
+
         with self._lock:
             self.strategy_name = target_strat
             self.universe = target_univ
             self.strategy_code = target_code
+            self.regime_filter = target_regime
+            self.regime_rule = target_rule
+            self.regime_index_symbol = target_index
             self._pause_requested = False
             self._stop_requested = False
             self.status = "running"
 
         self._thread = threading.Thread(
             target=self._run_optimization_loop,
-            args=(self.strategy_name, self.universe, 100000.0, execution_timing, {}),
+            args=(self.strategy_name, self.universe, self.initial_capital, execution_timing, self.compounding,
+                  self.regime_filter, self.regime_index_symbol, self.regime_rule, {}),
             daemon=True
         )
         self._thread.start()
@@ -281,9 +342,12 @@ class OptunaStrategyOptimizer:
                                initial_capital: float,
                                execution_timing: str,
                                compounding: bool,
+                               regime_filter: bool,
+                               regime_index_symbol: str,
+                               regime_rule: str,
                                ranges: Dict[str, Any]):
         """Background execution loop running Optuna trials step-by-step"""
-        study_name = self.get_study_name(strategy_name, universe)
+        study_name = self.get_study_name(strategy_name, universe, regime_filter, regime_rule)
         storage_url = self.get_storage_url()
 
         # Load or create study in SQLite
@@ -294,6 +358,11 @@ class OptunaStrategyOptimizer:
             load_if_exists=True,
             sampler=optuna.samplers.TPESampler(seed=42)
         )
+        study.set_user_attr("regime_filter", regime_filter)
+        study.set_user_attr("regime_index_symbol", regime_index_symbol)
+        study.set_user_attr("regime_rule", regime_rule)
+        study.set_user_attr("compounding", compounding)
+        study.set_user_attr("execution_timing", execution_timing)
 
         # Sync completed trials from persistent study
         with self._lock:
@@ -348,7 +417,11 @@ class OptunaStrategyOptimizer:
                 slippage_pct=0.05,
                 brokerage_pct=0.10,
                 execution_timing=execution_timing,
-                compounding=compounding
+                compounding=compounding,
+                regime_filter=regime_filter,
+                regime_index_symbol=regime_index_symbol,
+                regime_rule=regime_rule,
+                regime_map=self._regime_map
             )
 
             # Fast simulate using precomputed signals
@@ -434,9 +507,9 @@ class OptunaStrategyOptimizer:
                 self.status = "error"
                 self.error_message = str(e)
 
-    def reset_study(self, strategy_name: str, universe: str):
+    def reset_study(self, strategy_name: str, universe: str, regime_filter: bool = False, regime_rule: str = "sma_200"):
         """Deletes persistent study to start fresh if requested"""
-        study_name = self.get_study_name(strategy_name, universe)
+        study_name = self.get_study_name(strategy_name, universe, regime_filter, regime_rule)
         storage_url = self.get_storage_url()
         try:
             optuna.delete_study(study_name=study_name, storage=storage_url)
@@ -454,12 +527,12 @@ class OptunaStrategyOptimizer:
 
         return {"message": f"Study {study_name} has been reset."}
 
-    def apply_best_profile(self, strategy_name: str, universe: str) -> Dict[str, Any]:
+    def apply_best_profile(self, strategy_name: str, universe: str, regime_filter: bool = False, regime_rule: str = "sma_200") -> Dict[str, Any]:
         """
         Loads the best trial from the Optuna study, saves it permanently to DuckDB and JSON,
         and returns the active profile dictionary.
         """
-        study_name = self.get_study_name(strategy_name, universe)
+        study_name = self.get_study_name(strategy_name, universe, regime_filter, regime_rule)
         storage_url = self.get_storage_url()
 
         try:
@@ -478,6 +551,10 @@ class OptunaStrategyOptimizer:
         if best_p.get("enable_trailing_stop"):
             trailing_stop = best_p.get("trailing_stop_pct")
 
+        effective_regime_filter = study.user_attrs.get("regime_filter", regime_filter)
+        effective_regime_rule = study.user_attrs.get("regime_rule", regime_rule)
+        effective_compounding = study.user_attrs.get("compounding", getattr(self, "compounding", True))
+
         profile = {
             "strategy_name": strategy_name,
             "universe": universe,
@@ -487,6 +564,9 @@ class OptunaStrategyOptimizer:
             "take_profit_pct": float(best_p.get("take_profit_pct", 18.0)),
             "trailing_stop_pct": float(trailing_stop) if trailing_stop is not None else None,
             "max_positions": int(best_p.get("max_positions", 10)),
+            "compounding": effective_compounding,
+            "regime_filter": effective_regime_filter,
+            "regime_rule": effective_regime_rule,
             "best_metric_name": self.target_metric,
             "best_metric_value": float(best_t.value or 0.0),
             "total_trades": int(best_m.get("total_trades", 0)),

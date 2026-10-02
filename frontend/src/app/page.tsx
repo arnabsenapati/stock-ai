@@ -15,7 +15,12 @@ import {
   TrendingUp,
   Activity,
   Wifi,
-  WifiOff
+  WifiOff,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  Zap,
+  Clock
 } from 'lucide-react';
 
 import TradingChart from '../components/TradingChart';
@@ -24,7 +29,7 @@ import BacktestStudio from '../components/BacktestStudio';
 import ScreenerView from '../components/ScreenerView';
 import DataHub from '../components/DataHub';
 import { PWAInstallButton, usePWA } from '../components/PWAProvider';
-import { ChartDataResponse } from '../types';
+import { ChartDataResponse, SyncStatusResponse } from '../types';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'chart' | 'backtest' | 'screener' | 'data'>('chart');
@@ -35,6 +40,11 @@ export default function Home() {
   const [chartData, setChartData] = useState<ChartDataResponse | null>(null);
   const [loadingChart, setLoadingChart] = useState(false);
   const { isOnline } = usePWA();
+
+  // EOD Ingestion & Auto-Sync State
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResponse | null>(null);
+  const [isSyncingEod, setIsSyncingEod] = useState(false);
+  const [syncToastMessage, setSyncToastMessage] = useState<string | null>(null);
 
   // Support direct PWA shortcut / query param tab switching
   useEffect(() => {
@@ -77,8 +87,82 @@ export default function Home() {
     }
   };
 
+  // Fetch Sync Status & Perform Auto-Sync on App Launch
+  const checkFreshnessAndAutoSync = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/data/sync-status');
+      if (!res.ok) return;
+      const status: SyncStatusResponse = await res.json();
+      setSyncStatus(status);
+
+      // Automated check on opening the app
+      if (status.auto_sync_on_open && !status.is_up_to_date) {
+        setIsSyncingEod(true);
+        setSyncToastMessage(`Auto-syncing recent EOD data to ${status.latest_expected_trading_day}...`);
+        
+        try {
+          const syncRes = await fetch('http://localhost:8000/api/data/sync-incremental', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: false })
+          });
+          const syncResult = await syncRes.json();
+          if (syncRes.ok) {
+            setSyncToastMessage(`✓ Market data up to date (${syncResult.latest_date || status.latest_expected_trading_day})`);
+            // Refresh updated symbols and current chart
+            await fetchSymbols();
+            fetchChart(selectedSymbol, chartType);
+            // Refresh sync status
+            const updatedStatusRes = await fetch('http://localhost:8000/api/data/sync-status');
+            if (updatedStatusRes.ok) {
+              setSyncStatus(await updatedStatusRes.json());
+            }
+          }
+        } catch (syncErr) {
+          console.error("Auto-sync error on launch:", syncErr);
+        } finally {
+          setIsSyncingEod(false);
+          setTimeout(() => setSyncToastMessage(null), 4000);
+        }
+      }
+    } catch (e) {
+      console.error("Error checking sync status:", e);
+    }
+  };
+
+  // Manual trigger from header button
+  const triggerManualSync = async (force: boolean = false) => {
+    setIsSyncingEod(true);
+    setSyncToastMessage("Downloading latest market data to today...");
+    try {
+      const res = await fetch('http://localhost:8000/api/data/sync-incremental', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSyncToastMessage(`✓ ${data.message || 'Market data updated to today.'}`);
+        await fetchSymbols();
+        fetchChart(selectedSymbol, chartType);
+        const updatedRes = await fetch('http://localhost:8000/api/data/sync-status');
+        if (updatedRes.ok) {
+          setSyncStatus(await updatedRes.json());
+        }
+      } else {
+        setSyncToastMessage(`⚠️ Sync failed: ${data.detail || data.message}`);
+      }
+    } catch (e: any) {
+      setSyncToastMessage(`⚠️ Sync error: ${e.message}`);
+    } finally {
+      setIsSyncingEod(false);
+      setTimeout(() => setSyncToastMessage(null), 4000);
+    }
+  };
+
   useEffect(() => {
     fetchSymbols();
+    checkFreshnessAndAutoSync();
   }, []);
 
   useEffect(() => {
@@ -91,7 +175,19 @@ export default function Home() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-[#090d13] text-zinc-100 overflow-hidden font-sans antialiased">
+    <div className="flex flex-col h-screen w-screen bg-[#090d13] text-zinc-100 overflow-hidden font-sans antialiased relative">
+      {/* Toast Notification Banner for Ingestion / Auto-sync */}
+      {syncToastMessage && (
+        <div className="absolute top-16 right-4 z-50 bg-[#161b22] border border-blue-700/80 text-zinc-100 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs animate-fade-in font-medium">
+          {isSyncingEod ? (
+            <RefreshCw className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+          ) : (
+            <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+          )}
+          <span>{syncToastMessage}</span>
+        </div>
+      )}
+
       {/* Top Main Navigation Bar */}
       <header className="h-14 bg-[#161b22] border-b border-zinc-800 flex items-center justify-between px-4 shrink-0 select-none z-20">
         <div className="flex items-center gap-6">
@@ -115,7 +211,7 @@ export default function Home() {
           <nav className="flex items-center bg-[#0d1117] rounded-lg p-0.5 border border-zinc-800 text-xs font-medium">
             <button
               onClick={() => setActiveTab('chart')}
-              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'chart' 
                   ? 'bg-blue-600 text-white shadow' 
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -125,7 +221,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setActiveTab('backtest')}
-              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'backtest' 
                   ? 'bg-blue-600 text-white shadow' 
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -135,7 +231,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setActiveTab('screener')}
-              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'screener' 
                   ? 'bg-blue-600 text-white shadow' 
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -145,7 +241,7 @@ export default function Home() {
             </button>
             <button
               onClick={() => setActiveTab('data')}
-              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all ${
+              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'data' 
                   ? 'bg-blue-600 text-white shadow' 
                   : 'text-zinc-400 hover:text-zinc-200'
@@ -156,8 +252,35 @@ export default function Home() {
           </nav>
         </div>
 
-        {/* Right Info Badges & PWA Action */}
+        {/* Right Info Badges, EOD Status & PWA Action */}
         <div className="flex items-center gap-3 text-xs">
+          {/* EOD Data Synchronization Status Indicator */}
+          {isSyncingEod ? (
+            <div className="flex items-center gap-1.5 bg-blue-950/80 border border-blue-700/80 px-2.5 py-1 rounded-lg font-mono text-[11px] text-blue-300 animate-pulse">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+              <span>Syncing EOD...</span>
+            </div>
+          ) : syncStatus?.is_up_to_date ? (
+            <button
+              onClick={() => triggerManualSync(true)}
+              title="Market data is up to date with the latest session. Click to force refresh."
+              className="flex items-center gap-1.5 bg-[#0d1117] border border-zinc-800 hover:border-zinc-700 px-2.5 py-1 rounded-lg font-mono text-[11px] text-emerald-400 cursor-pointer transition-all"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-zinc-400 hidden sm:inline">EOD:</span>
+              <span className="text-zinc-200">{syncStatus?.current_db_date || 'Current'}</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => triggerManualSync(false)}
+              title="Click to sync missing EOD bars to today"
+              className="flex items-center gap-1.5 bg-gradient-to-r from-amber-950/80 to-amber-900/60 border border-amber-600/80 hover:border-amber-500 text-amber-300 px-2.5 py-1 rounded-lg font-mono text-[11px] transition-all cursor-pointer shadow-sm animate-pulse"
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+              <span>Sync to Today ({syncStatus?.days_behind || 1}d behind)</span>
+            </button>
+          )}
+
           {/* PWA Direct Installation Button */}
           <PWAInstallButton />
 

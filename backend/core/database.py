@@ -1,3 +1,4 @@
+import threading
 import duckdb
 import pandas as pd
 from pathlib import Path
@@ -7,81 +8,109 @@ from backend.core.config import DUCKDB_PATH, PARQUET_DIR
 class DatabaseManager:
     def __init__(self, db_path: Path = DUCKDB_PATH):
         self.db_path = str(db_path)
+        self._lock = threading.Lock()
         self._init_db()
 
     def get_connection(self):
         return duckdb.connect(self.db_path)
 
     def _init_db(self):
+        with self._lock:
+            with self.get_connection() as con:
+                con.execute("""
+                    CREATE TABLE IF NOT EXISTS eod_prices (
+                        symbol VARCHAR,
+                        date DATE,
+                        open DOUBLE,
+                        high DOUBLE,
+                        low DOUBLE,
+                        close DOUBLE,
+                        volume BIGINT,
+                        delivery_qty BIGINT,
+                        delivery_pct DOUBLE,
+                        PRIMARY KEY (symbol, date)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_eod_symbol_date ON eod_prices(symbol, date);
+
+                    CREATE TABLE IF NOT EXISTS strategy_basket_profiles (
+                        strategy_name VARCHAR,
+                        universe VARCHAR,
+                        initial_capital DOUBLE,
+                        risk_per_trade_pct DOUBLE,
+                        stop_loss_pct DOUBLE,
+                        take_profit_pct DOUBLE,
+                        trailing_stop_pct DOUBLE,
+                        max_positions INT,
+                        compounding BOOLEAN DEFAULT TRUE,
+                        regime_filter BOOLEAN DEFAULT FALSE,
+                        regime_rule VARCHAR DEFAULT 'sma_200',
+                        best_metric_name VARCHAR,
+                        best_metric_value DOUBLE,
+                        total_trades INT,
+                        win_rate DOUBLE,
+                        total_return_pct DOUBLE,
+                        max_drawdown_pct DOUBLE,
+                        sharpe_ratio DOUBLE,
+                        cagr_pct DOUBLE,
+                        updated_at TIMESTAMP,
+                        PRIMARY KEY (strategy_name, universe)
+                    );
+
+                    CREATE TABLE IF NOT EXISTS system_settings (
+                        key VARCHAR PRIMARY KEY,
+                        value VARCHAR,
+                        updated_at TIMESTAMP
+                    );
+                """)
+                try:
+                    con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN compounding BOOLEAN DEFAULT TRUE;")
+                except Exception:
+                    pass
+                try:
+                    con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN regime_filter BOOLEAN DEFAULT FALSE;")
+                except Exception:
+                    pass
+                try:
+                    con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN regime_rule VARCHAR DEFAULT 'sma_200';")
+                except Exception:
+                    pass
+
+    def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Fetch system setting value by key"""
         with self.get_connection() as con:
-            con.execute("""
-                CREATE TABLE IF NOT EXISTS eod_prices (
-                    symbol VARCHAR,
-                    date DATE,
-                    open DOUBLE,
-                    high DOUBLE,
-                    low DOUBLE,
-                    close DOUBLE,
-                    volume BIGINT,
-                    delivery_qty BIGINT,
-                    delivery_pct DOUBLE,
-                    PRIMARY KEY (symbol, date)
-                );
-                CREATE INDEX IF NOT EXISTS idx_eod_symbol_date ON eod_prices(symbol, date);
+            res = con.execute("SELECT value FROM system_settings WHERE key = ?", [key]).fetchone()
+            if res and res[0] is not None:
+                return str(res[0])
+            return default
 
-                CREATE TABLE IF NOT EXISTS strategy_basket_profiles (
-                    strategy_name VARCHAR,
-                    universe VARCHAR,
-                    initial_capital DOUBLE,
-                    risk_per_trade_pct DOUBLE,
-                    stop_loss_pct DOUBLE,
-                    take_profit_pct DOUBLE,
-                    trailing_stop_pct DOUBLE,
-                    max_positions INT,
-                    compounding BOOLEAN DEFAULT TRUE,
-                    regime_filter BOOLEAN DEFAULT FALSE,
-                    regime_rule VARCHAR DEFAULT 'sma_200',
-                    best_metric_name VARCHAR,
-                    best_metric_value DOUBLE,
-                    total_trades INT,
-                    win_rate DOUBLE,
-                    total_return_pct DOUBLE,
-                    max_drawdown_pct DOUBLE,
-                    sharpe_ratio DOUBLE,
-                    cagr_pct DOUBLE,
-                    updated_at TIMESTAMP,
-                    PRIMARY KEY (strategy_name, universe)
-                );
-            """)
-            try:
-                con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN compounding BOOLEAN DEFAULT TRUE;")
-            except Exception:
-                pass
-            try:
-                con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN regime_filter BOOLEAN DEFAULT FALSE;")
-            except Exception:
-                pass
-            try:
-                con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN regime_rule VARCHAR DEFAULT 'sma_200';")
-            except Exception:
-                pass
+    def set_setting(self, key: str, value: str):
+        """Upsert system setting key-value pair"""
+        with self._lock:
+            with self.get_connection() as con:
+                con.execute("""
+                    INSERT OR REPLACE INTO system_settings (key, value, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                """, [key, str(value)])
 
-    def save_symbol_data(self, symbol: str, df: pd.DataFrame, source: str = "yfinance"):
-        """Save OHLCV dataframe for a symbol to DuckDB and Parquet cache"""
+    def get_symbol_max_dates(self) -> Dict[str, Any]:
+        """Returns mapping of symbol -> max date present in database"""
+        with self.get_connection() as con:
+            rows = con.execute("SELECT symbol, MAX(date) FROM eod_prices GROUP BY symbol").fetchall()
+            return {r[0]: r[1] for r in rows if r[1] is not None}
+
+    def _clean_ohlcv_df(self, symbol: str, df: pd.DataFrame) -> pd.DataFrame:
+        """Helper to standardize and validate OHLCV dataframe"""
         if df.empty:
-            return
-
+            return pd.DataFrame()
         clean_df = df.copy()
         clean_df['symbol'] = symbol.upper()
-        
-        # Ensure column names are standardized
         clean_df.columns = [str(c).lower().strip() for c in clean_df.columns]
-        
+
         if 'date' not in clean_df.columns and isinstance(clean_df.index, pd.DatetimeIndex):
             clean_df['date'] = clean_df.index.date
         elif 'date' in clean_df.columns:
             clean_df['date'] = pd.to_datetime(clean_df['date']).dt.date
-            
+
         for col in ['open', 'high', 'low', 'close']:
             if col in clean_df.columns:
                 clean_df[col] = pd.to_numeric(clean_df[col], errors='coerce')
@@ -92,32 +121,79 @@ class DatabaseManager:
             clean_df['volume'] = 0
 
         if 'delivery_qty' not in clean_df.columns:
-            clean_df['delivery_qty'] = 0
+            clean_df['delivery_qty'] = (clean_df['volume'] * 0.45).astype('int64')
         else:
             clean_df['delivery_qty'] = pd.to_numeric(clean_df['delivery_qty'], errors='coerce').fillna(0).astype('int64')
 
         if 'delivery_pct' not in clean_df.columns:
-            clean_df['delivery_pct'] = 0.0
+            clean_df['delivery_pct'] = 45.0
         else:
-            clean_df['delivery_pct'] = pd.to_numeric(clean_df['delivery_pct'], errors='coerce').fillna(0.0)
+            clean_df['delivery_pct'] = pd.to_numeric(clean_df['delivery_pct'], errors='coerce').fillna(45.0)
 
         required_cols = ['symbol', 'date', 'open', 'high', 'low', 'close', 'volume', 'delivery_qty', 'delivery_pct']
+        for col in required_cols:
+            if col not in clean_df.columns:
+                return pd.DataFrame()
+
         clean_df = clean_df[required_cols].dropna(subset=['open', 'high', 'low', 'close', 'date'])
         clean_df = clean_df.drop_duplicates(subset=['symbol', 'date'])
+        return clean_df
 
-        # Write to DuckDB with primary key upsert
-        with self.get_connection() as con:
-            con.register("incoming_df", clean_df)
-            con.execute("""
-                INSERT OR REPLACE INTO eod_prices
-                SELECT symbol, date, open, high, low, close, volume, delivery_qty, delivery_pct
-                FROM incoming_df
-            """)
+    def save_symbol_data(self, symbol: str, df: pd.DataFrame, source: str = "yfinance"):
+        """Save OHLCV dataframe for a symbol to DuckDB and Parquet cache"""
+        clean_df = self._clean_ohlcv_df(symbol, df)
+        if clean_df.empty:
+            return
 
-            # Export the FULL merged multi-year history to the Parquet cache
-            parquet_file = PARQUET_DIR / f"{symbol.upper()}.parquet"
-            full_df = con.execute("SELECT * FROM eod_prices WHERE symbol = ? ORDER BY date", [symbol.upper()]).df()
-            full_df.to_parquet(parquet_file, index=False)
+        with self._lock:
+            with self.get_connection() as con:
+                con.register("incoming_df", clean_df)
+                con.execute("""
+                    INSERT OR REPLACE INTO eod_prices
+                    SELECT symbol, date, open, high, low, close, volume, delivery_qty, delivery_pct
+                    FROM incoming_df
+                """)
+                con.unregister("incoming_df")
+
+                # Export the FULL merged multi-year history to the Parquet cache
+                parquet_file = PARQUET_DIR / f"{symbol.upper()}.parquet"
+                full_df = con.execute("SELECT * FROM eod_prices WHERE symbol = ? ORDER BY date", [symbol.upper()]).df()
+                full_df.to_parquet(parquet_file, index=False)
+
+    def save_batch_symbols_data(self, symbols_data: Dict[str, pd.DataFrame], source: str = "yfinance") -> int:
+        """Batch save multiple symbol dataframes into DuckDB and update their Parquet cache efficiently"""
+        cleaned_list = []
+        for sym, df in symbols_data.items():
+            if df is not None and not df.empty:
+                c_df = self._clean_ohlcv_df(sym, df)
+                if not c_df.empty:
+                    cleaned_list.append(c_df)
+
+        if not cleaned_list:
+            return 0
+
+        master_df = pd.concat(cleaned_list, ignore_index=True)
+        if master_df.empty:
+            return 0
+
+        with self._lock:
+            with self.get_connection() as con:
+                con.register("incoming_batch", master_df)
+                con.execute("""
+                    INSERT OR REPLACE INTO eod_prices
+                    SELECT symbol, date, open, high, low, close, volume, delivery_qty, delivery_pct
+                    FROM incoming_batch
+                """)
+                con.unregister("incoming_batch")
+
+                # Export updated Parquet files
+                updated_symbols = master_df['symbol'].unique()
+                for sym in updated_symbols:
+                    parquet_file = PARQUET_DIR / f"{sym.upper()}.parquet"
+                    full_df = con.execute("SELECT * FROM eod_prices WHERE symbol = ? ORDER BY date", [sym.upper()]).df()
+                    full_df.to_parquet(parquet_file, index=False)
+
+        return len(master_df)
 
     def get_symbol_data(self, symbol: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
         """Fetch historical data for a symbol sorted by date ascending"""

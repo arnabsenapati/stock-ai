@@ -83,6 +83,7 @@ Sell = CrossUnder(Trend, 0)
   const [savedProfile, setSavedProfile] = useState<StrategyBasketProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState<boolean>(false);
   const [showOptModal, setShowOptModal] = useState<boolean>(false);
+  const [showOptRegimeOptions, setShowOptRegimeOptions] = useState<boolean>(true);
 
   // Optimization state
   const [optStatus, setOptStatus] = useState<OptimizationStatusResponse | null>(null);
@@ -183,7 +184,7 @@ Sell = Close < LLV(Low, 10).shift(1)
     if (showOptModal || optStatus?.status === 'running') {
       const pollStatus = async () => {
         try {
-          const res = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
+          const res = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}&regime_filter=${enableRegimeFilter}&regime_rule=${encodeURIComponent(regimeRule)}`);
           if (res.ok) {
             const data: OptimizationStatusResponse = await res.json();
             setOptStatus(data);
@@ -198,7 +199,7 @@ Sell = Close < LLV(Low, 10).shift(1)
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [showOptModal, optStatus?.status, selectedPresetName, selectedUniverse]);
+  }, [showOptModal, optStatus?.status, selectedPresetName, selectedUniverse, enableRegimeFilter, regimeRule]);
 
   const handleStartOpt = async () => {
     setOptLoading(true);
@@ -220,6 +221,9 @@ Sell = Close < LLV(Low, 10).shift(1)
           initial_capital: initialCapital,
           execution_timing: executionTiming,
           compounding: compounding,
+          regime_filter: enableRegimeFilter,
+          regime_index_symbol: regimeIndexSymbol,
+          regime_rule: regimeRule,
           param_ranges: optRanges,
           start_date: startDate
         })
@@ -229,7 +233,7 @@ Sell = Close < LLV(Low, 10).shift(1)
         const errData = await res.json();
         throw new Error(errData.detail || 'Failed to start optimization');
       }
-      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
+      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}&regime_filter=${enableRegimeFilter}&regime_rule=${encodeURIComponent(regimeRule)}`);
       if (statusRes.ok) {
         setOptStatus(await statusRes.json());
       }
@@ -243,7 +247,7 @@ Sell = Close < LLV(Low, 10).shift(1)
   const handlePauseOpt = async () => {
     try {
       await fetch('http://localhost:8000/api/optimize/pause', { method: 'POST' });
-      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
+      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}&regime_filter=${enableRegimeFilter}&regime_rule=${encodeURIComponent(regimeRule)}`);
       if (statusRes.ok) {
         setOptStatus(await statusRes.json());
       }
@@ -261,10 +265,13 @@ Sell = Close < LLV(Low, 10).shift(1)
           strategy_name: selectedPresetName,
           universe: selectedUniverse,
           strategy_code: strategyCode,
-          execution_timing: executionTiming
+          execution_timing: executionTiming,
+          regime_filter: enableRegimeFilter,
+          regime_index_symbol: regimeIndexSymbol,
+          regime_rule: regimeRule
         })
       });
-      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}`);
+      const statusRes = await fetch(`http://localhost:8000/api/optimize/status?strategy_name=${encodeURIComponent(selectedPresetName)}&universe=${encodeURIComponent(selectedUniverse)}&regime_filter=${enableRegimeFilter}&regime_rule=${encodeURIComponent(regimeRule)}`);
       if (statusRes.ok) {
         setOptStatus(await statusRes.json());
       }
@@ -274,14 +281,16 @@ Sell = Close < LLV(Low, 10).shift(1)
   };
 
   const handleResetOpt = async () => {
-    if (!confirm(`Are you sure you want to reset the optimization study for "${selectedPresetName}" on "${selectedUniverse}"? All trial checkpoints will be cleared.`)) return;
+    if (!confirm(`Are you sure you want to reset the optimization study for "${selectedPresetName}" on "${selectedUniverse}"? All trial checkpoints for this regime configuration will be cleared.`)) return;
     try {
       await fetch('http://localhost:8000/api/optimize/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           strategy_name: selectedPresetName,
-          universe: selectedUniverse
+          universe: selectedUniverse,
+          regime_filter: enableRegimeFilter,
+          regime_rule: regimeRule
         })
       });
       setOptStatus(null);
@@ -297,7 +306,9 @@ Sell = Close < LLV(Low, 10).shift(1)
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           strategy_name: selectedPresetName,
-          universe: selectedUniverse
+          universe: selectedUniverse,
+          regime_filter: enableRegimeFilter,
+          regime_rule: regimeRule
         })
       });
       if (!res.ok) {
@@ -1246,7 +1257,7 @@ Sell = Close < LLV(Low, 10).shift(1)
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
               {/* Target Setup Info */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-[#0d1117] p-2.5 rounded-xl border border-zinc-800/80 text-[11px]">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-[#0d1117] p-2.5 rounded-xl border border-zinc-800/80 text-[11px]">
                 <div>
                   <span className="text-zinc-500 block text-[10px]">Strategy</span>
                   <span className="text-white font-medium truncate block" title={selectedPresetName}>{selectedPresetName}</span>
@@ -1262,6 +1273,19 @@ Sell = Close < LLV(Low, 10).shift(1)
                 <div>
                   <span className="text-zinc-500 block text-[10px]">Execution Timing</span>
                   <span className="text-zinc-300">{executionTiming === 'next_open' ? 'Next Day Open' : 'Same Day Close'}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block text-[10px]">Index Cash Protection</span>
+                  <span className={`font-semibold flex items-center gap-1 ${enableRegimeFilter ? 'text-cyan-400' : 'text-zinc-400'}`}>
+                    {enableRegimeFilter ? (
+                      <>
+                        <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                        <span>Enabled</span>
+                      </>
+                    ) : (
+                      'Disabled'
+                    )}
+                  </span>
                 </div>
               </div>
 
@@ -1298,6 +1322,89 @@ Sell = Close < LLV(Low, 10).shift(1)
                     <option value={1000}>1000 Trials (Exhaustive Institutional Sweep ~1.5m)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Market Regime Filter (Index Cash Protection) Accordion in Optimize Basket */}
+              <div className="border border-zinc-800/80 rounded-xl overflow-hidden bg-[#0d1117]/80">
+                <button
+                  type="button"
+                  onClick={() => setShowOptRegimeOptions(!showOptRegimeOptions)}
+                  className="w-full flex items-center justify-between p-2.5 text-[11px] font-semibold text-zinc-300 hover:text-white transition-colors bg-zinc-900/50"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                    <span>Market Regime: Index Cash Protection</span>
+                    {enableRegimeFilter ? (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] bg-cyan-950 border border-cyan-700/60 text-cyan-300 font-mono">
+                        Protected
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.2 rounded text-[9px] bg-zinc-800/80 border border-zinc-700 text-zinc-400 font-mono">
+                        Off
+                      </span>
+                    )}
+                  </div>
+                  <ChevronRight className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${showOptRegimeOptions ? 'rotate-90' : ''}`} />
+                </button>
+
+                {showOptRegimeOptions && (
+                  <div className="p-3 space-y-2.5 border-t border-zinc-800/80 bg-black/30 text-xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] text-zinc-300 font-medium flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={enableRegimeFilter}
+                          disabled={optStatus?.status === 'running'}
+                          onChange={e => setEnableRegimeFilter(e.target.checked)}
+                          className="rounded border-zinc-700 text-cyan-500 focus:ring-cyan-500 bg-zinc-800 cursor-pointer"
+                        />
+                        <span>Enable Index Cash Protection</span>
+                      </label>
+                      <span className="text-[10px] text-zinc-500 font-mono">Avoid Bear Breakouts</span>
+                    </div>
+
+                    <div className="text-[10px] text-zinc-400">
+                      Fixed optimization option: Select whether Cash Protection is ON or OFF across all Bayesian exploration trials. (Not tuned by optimizer)
+                    </div>
+
+                    {enableRegimeFilter && (
+                      <div className="space-y-2 pt-2 border-t border-zinc-800/50">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-1">Benchmark Index</label>
+                            <input
+                              type="text"
+                              value={regimeIndexSymbol}
+                              disabled={optStatus?.status === 'running'}
+                              onChange={e => setRegimeIndexSymbol(e.target.value.toUpperCase())}
+                              placeholder="^NSEI (Nifty 50)"
+                              className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-zinc-400 block mb-1">Regime Defense Rule</label>
+                            <select
+                              value={regimeRule}
+                              disabled={optStatus?.status === 'running'}
+                              onChange={e => setRegimeRule(e.target.value)}
+                              className="w-full bg-[#0d1117] border border-zinc-800 rounded px-2 py-1 text-zinc-200 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                            >
+                              <option value="sma_200">Nifty 50 &gt; 200 SMA (Institutional Macro Bull - Max Profit)</option>
+                              <option value="sma_50">Nifty 50 &gt; 50 SMA (Tactical Trend - Lowest Drawdown)</option>
+                              <option value="sma_100">Nifty 50 &gt; 100 SMA (Intermediate Macro Trend)</option>
+                              <option value="supertrend">Nifty 50 SuperTrend(10, 3) Bullish</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="p-2 rounded bg-cyan-950/30 border border-cyan-900/40 text-[10px] text-cyan-200/90 leading-tight">
+                          🛡️ <strong>Cash Defense during Optimization:</strong> Vetoes new buy entries whenever {regimeIndexSymbol} is below its {regimeRule.toUpperCase().replace('_', ' ')}. Keeps portfolio safely in cash during broad market corrections, cutting out false breakouts and boosting win rate.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Parameter Boundaries Grid */}
@@ -1475,10 +1582,20 @@ Sell = Close < LLV(Low, 10).shift(1)
               {optStatus && optStatus.best_value !== null && optStatus.best_value !== undefined ? (
                 <div className="p-3.5 rounded-xl bg-gradient-to-br from-purple-950/40 via-zinc-900 to-[#161b22] border border-purple-600/40 shadow-lg space-y-3">
                   <div className="flex items-center justify-between border-b border-zinc-800/60 pb-2">
-                    <div className="flex items-center gap-1.5 text-purple-300 font-semibold text-xs">
+                    <div className="flex items-center gap-1.5 text-purple-300 font-semibold text-xs flex-wrap">
                       <Sparkles className="w-4 h-4 text-purple-400" />
                       <span>Current Best Discovery</span>
                       <span className="text-[10px] text-zinc-400 font-normal">({optStatus.target_metric})</span>
+                      {optStatus.regime_filter ? (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-cyan-950 border border-cyan-700/60 text-cyan-300 font-mono flex items-center gap-1">
+                          <ShieldCheck className="w-3 h-3 text-cyan-400" />
+                          <span>Protected ({optStatus.regime_rule?.toUpperCase().replace('_', ' ') || 'SMA 200'})</span>
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] bg-zinc-800 border border-zinc-700 text-zinc-400 font-mono">
+                          Unfiltered
+                        </span>
+                      )}
                     </div>
                     <span className="text-base font-extrabold font-mono text-emerald-400">
                       {optStatus.best_value > 0 ? '+' : ''}{optStatus.best_value.toFixed(2)}

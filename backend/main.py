@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import date, datetime, timedelta
+from contextlib import asynccontextmanager
 import pandas as pd
 import numpy as np
 
@@ -13,6 +14,7 @@ from backend.core.config import (
 from backend.core.database import db
 from backend.data.yfinance_feed import yf_feed
 from backend.data.bhavcopy import bhavcopy_hub
+from backend.data.scheduler import data_scheduler
 from backend.analytics.indicators import ta
 from backend.analytics.chart_types import chart_converter
 from backend.backtester.engine import backtest_engine
@@ -20,10 +22,19 @@ from backend.backtester.strategy_dsl import PRESET_STRATEGIES
 from backend.screener.scanner import screener
 from backend.backtester.optimizer import strategy_optimizer
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: start automated morning scheduler
+    data_scheduler.start()
+    yield
+    # Shutdown: stop scheduler
+    data_scheduler.stop()
+
 app = FastAPI(
     title="AmiBroker-Class Indian EOD Stock Terminal",
     description="High-performance End-of-Day Indian Market Analytics, Multi-Pane Charting & Backtesting Platform",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Enable CORS for Next.js frontend
@@ -39,6 +50,15 @@ app.add_middleware(
 class DownloadRequest(BaseModel):
     symbols: List[str]
     period: str = "5y"
+
+class IncrementalSyncRequest(BaseModel):
+    symbols: Optional[List[str]] = None
+    force: bool = False
+
+class ScheduleConfigRequest(BaseModel):
+    morning_schedule_enabled: Optional[bool] = None
+    morning_schedule_time: Optional[str] = None
+    auto_sync_on_open: Optional[bool] = None
 
 class BacktestRequest(BaseModel):
     mode: str = "single" # "single" or "basket"
@@ -81,6 +101,9 @@ class OptimizeStartRequest(BaseModel):
     initial_capital: float = 100000.0
     execution_timing: str = "next_open"
     compounding: bool = True
+    regime_filter: bool = False
+    regime_index_symbol: str = "^NSEI"
+    regime_rule: str = "sma_200"
     param_ranges: Optional[Dict[str, Any]] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
@@ -88,6 +111,8 @@ class OptimizeStartRequest(BaseModel):
 class OptimizeActionRequest(BaseModel):
     strategy_name: str
     universe: str
+    regime_filter: Optional[bool] = False
+    regime_rule: Optional[str] = "sma_200"
 
 class StrategyPresetSaveRequest(BaseModel):
     strategy_name: str
@@ -152,6 +177,28 @@ def download_data(req: DownloadRequest, background_tasks: BackgroundTasks):
     """Trigger background download of stock histories"""
     res = yf_feed.batch_download(req.symbols, period=req.period)
     return res
+
+@app.post("/api/data/sync-incremental")
+def sync_incremental(req: IncrementalSyncRequest):
+    """
+    Download missing EOD bars from last available date to today's date.
+    Triggers automatically on app open or on demand.
+    """
+    return data_scheduler.trigger_sync(symbols=req.symbols, force=req.force, reason="user_or_app_request")
+
+@app.get("/api/data/sync-status")
+def get_sync_status():
+    """Live status of morning scheduler, last sync, freshness and data horizon"""
+    return data_scheduler.get_status()
+
+@app.post("/api/data/sync-schedule")
+def update_sync_schedule(req: ScheduleConfigRequest):
+    """Configure morning scheduler and auto-sync on app open settings"""
+    return data_scheduler.update_config(
+        morning_schedule_enabled=req.morning_schedule_enabled,
+        morning_schedule_time=req.morning_schedule_time,
+        auto_sync_on_open=req.auto_sync_on_open
+    )
 
 @app.get("/api/data/summary")
 def get_data_summary():
@@ -415,6 +462,9 @@ def start_optimization(req: OptimizeStartRequest):
             initial_capital=req.initial_capital,
             execution_timing=req.execution_timing,
             compounding=req.compounding,
+            regime_filter=req.regime_filter,
+            regime_index_symbol=req.regime_index_symbol,
+            regime_rule=req.regime_rule,
             param_ranges=req.param_ranges,
             start_date=req.start_date,
             end_date=req.end_date
@@ -441,7 +491,10 @@ def resume_optimization(req: Optional[OptimizeStartRequest] = None):
                 strategy_name=req.strategy_name,
                 universe=req.universe,
                 strategy_code=req.strategy_code,
-                execution_timing=req.execution_timing
+                execution_timing=req.execution_timing,
+                regime_filter=req.regime_filter,
+                regime_index_symbol=req.regime_index_symbol,
+                regime_rule=req.regime_rule
             )
         else:
             res = strategy_optimizer.resume_optimization()
@@ -452,21 +505,33 @@ def resume_optimization(req: Optional[OptimizeStartRequest] = None):
 @app.get("/api/optimize/status")
 def get_optimization_status(
     strategy_name: Optional[str] = Query(None),
-    universe: Optional[str] = Query(None)
+    universe: Optional[str] = Query(None),
+    regime_filter: Optional[bool] = Query(False),
+    regime_rule: Optional[str] = Query("sma_200")
 ):
     """Live status, trial progress, and current best parameters"""
-    return strategy_optimizer.get_status(strategy_name, universe)
+    return strategy_optimizer.get_status(strategy_name, universe, regime_filter, regime_rule)
 
 @app.post("/api/optimize/reset")
 def reset_optimization(req: OptimizeActionRequest):
     """Reset persistent study for strategy + universe"""
-    return strategy_optimizer.reset_study(req.strategy_name, req.universe)
+    return strategy_optimizer.reset_study(
+        req.strategy_name,
+        req.universe,
+        regime_filter=req.regime_filter or False,
+        regime_rule=req.regime_rule or "sma_200"
+    )
 
 @app.post("/api/optimize/apply")
 def apply_optimization(req: OptimizeActionRequest):
     """Persist best trial parameters to DuckDB and JSON preset profile"""
     try:
-        saved_profile = strategy_optimizer.apply_best_profile(req.strategy_name, req.universe)
+        saved_profile = strategy_optimizer.apply_best_profile(
+            req.strategy_name,
+            req.universe,
+            regime_filter=req.regime_filter or False,
+            regime_rule=req.regime_rule or "sma_200"
+        )
         return {
             "status": "applied",
             "message": f"Optimal parameters saved for {req.strategy_name} on {req.universe}",

@@ -23,7 +23,8 @@ class BacktestEngine:
                  breakeven_on_partial: bool = False,
                  regime_filter: bool = False,
                  regime_index_symbol: str = "^NSEI",
-                 regime_rule: str = "sma_200"):
+                 regime_rule: str = "sma_200",
+                 regime_map: Optional[Dict[Any, bool]] = None):
         self.initial_capital = initial_capital
         self.max_positions = max_positions
         self.risk_per_trade_pct = risk_per_trade_pct
@@ -40,6 +41,7 @@ class BacktestEngine:
         self.regime_filter = regime_filter
         self.regime_index_symbol = regime_index_symbol.upper() if regime_index_symbol else "^NSEI"
         self.regime_rule = regime_rule or "sma_200"
+        self.regime_map = regime_map
 
     def _get_regime_map(self) -> Dict[Any, bool]:
         """
@@ -141,7 +143,7 @@ class BacktestEngine:
         open_positions = {} # symbol -> {entry_date, entry_price, qty, highest_price}
         trades_log = []
         equity_curve = []
-        regime_map = self._get_regime_map() if self.regime_filter else {}
+        regime_map = self.regime_map if self.regime_map is not None else (self._get_regime_map() if self.regime_filter else {})
         regime_blocked_days = 0
         regime_filtered_entries = 0
 
