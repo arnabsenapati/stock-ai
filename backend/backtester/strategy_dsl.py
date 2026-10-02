@@ -170,6 +170,43 @@ VolAvg = SMA(Volume, 20)
 Buy = (Close > HHV(Close, 20).shift(1)) & (Volume > VolAvg * 1.5) & (DeliveryPct > 45.0)
 Sell = CrossUnder(Close, EMA(Close, 20))
 """,
+    "Dual SuperTrend Momentum (Fast Trigger + Macro Anchor)": """# Dual SuperTrend Momentum (Fast Trigger + Macro Anchor)
+# Macro Anchor: Stock above 100 SMA and Slow SuperTrend(14, 3.0) is bullish
+MacroTrend = (Close > SMA(Close, 100)) & (SuperTrend_Trend(14, 3.0) > 0)
+
+# Fast Trigger: Quick momentum flip on SuperTrend(7, 2.0)
+FastTrend = SuperTrend_Trend(7, 2.0)
+
+Buy = MacroTrend & Cross(FastTrend, 0)
+Sell = CrossUnder(FastTrend, 0)
+""",
+    "Stage 2 Minervini Trend Leader (52-Week High Momentum)": """# Stage 2 Minervini Trend Leader (52-Week High Momentum)
+# Rule 1: Stage 2 Moving Average Hierarchy (200 SMA rising, 50 SMA > 200 SMA)
+Stage2 = (Close > SMA(Close, 200)) & (SMA(Close, 50) > SMA(Close, 200)) & (Close > EMA(Close, 20))
+
+# Rule 2: Near 6-Month Highs (within 12%) + Fresh 20-Day Range Breakout
+NearHighs = Close >= (HHV(High, 120) * 0.88)
+Breakout = Cross(Close, HHV(Close, 20).shift(1))
+
+# Rule 3: Sweet-Spot Momentum (RSI 55-80) with Volume Expansion
+Momentum = (RSI(Close, 14) > 55) & (RSI(Close, 14) < 80) & (Volume > SMA(Volume, 20))
+
+Buy = Stage2 & NearHighs & Breakout & Momentum
+Sell = CrossUnder(Close, EMA(Close, 20)) | CrossUnder(Close, SMA(Close, 50))
+""",
+    "EMA Pullback in Strong Uptrend (Dip Buyer)": """# EMA Pullback in Strong Uptrend (Dip Buyer)
+# Rule 1: Master Institutional Uptrend (Above 100 SMA & 50 > 200 SMA)
+Uptrend = (Close > SMA(Close, 100)) & (SMA(Close, 50) > SMA(Close, 200))
+
+# Rule 2: Pullback test of rising 20 EMA with bullish green reversal close
+Pullback = (Low <= EMA(Close, 20)) & (Close > EMA(Close, 20)) & (Close > Open)
+
+# Rule 3: RSI turning upward out of mild consolidation
+RSI_Bounce = (RSI(Close, 14) > 48) & (RSI(Close, 14) < 68)
+
+Buy = Uptrend & Pullback & RSI_Bounce
+Sell = CrossUnder(Close, SMA(Close, 50))
+""",
     "Turtle Donchian Breakout": """# Classic 20-Day Donchian Breakout
 Buy = Close > HHV(High, 20).shift(1)
 Sell = Close < LLV(Low, 10).shift(1)
