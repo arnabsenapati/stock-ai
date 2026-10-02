@@ -1,6 +1,6 @@
 @echo off
 echo ========================================================
-echo   Launching AmiBroker-Class Indian EOD Stock Terminal
+echo   Launching Stock AI - Indian EOD Stock Terminal
 echo ========================================================
 echo.
 

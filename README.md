@@ -1,4 +1,4 @@
-# AmiBroker-Class Indian EOD Stock Market Terminal
+# Stock AI - Indian EOD Stock Market Terminal
 
 A high-performance End-of-Day (EOD) stock market analytics, multi-pane charting, screening, and backtesting workstation tailored for Indian markets (NSE & BSE).
 
@@ -13,8 +13,8 @@ A high-performance End-of-Day (EOD) stock market analytics, multi-pane charting,
    - Separate Oscillator Panes: RSI (14, Wilder's smoothing with 70/30 bands), MACD (12, 26, 9 with signal line and color-coded histogram).
    - Crosshair synchronization across multiple panes.
 
-2. **AmiBroker-Style Strategy Scripting & Formula DSL**:
-   - Write strategies using clean AmiBroker AFL or Python expressions:
+2. **Python Strategy Scripting & Formula DSL**:
+   - Write strategies using clean Python expressions:
      ```python
      # Example: SuperTrend Trend Following
      Trend = SuperTrend_Trend(10, 3.0)

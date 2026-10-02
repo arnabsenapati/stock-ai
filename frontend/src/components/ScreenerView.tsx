@@ -59,7 +59,7 @@ Sell = CrossUnder(Trend, 0)`
     { 
       id: 'Custom Formula', 
       label: 'Custom Strategy Rule (Buy & Sell)', 
-      desc: 'Run multi-criteria AFL/Python formula scanner' 
+      desc: 'Run multi-criteria Python formula scanner' 
     }
   ];
 

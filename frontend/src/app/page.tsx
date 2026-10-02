@@ -198,12 +198,12 @@ export default function Home() {
             </div>
             <div>
               <div className="text-sm font-extrabold tracking-wide text-white flex items-center gap-1.5">
-                AmiBroker<span className="text-blue-400">Terminal</span>
+                Stock <span className="text-blue-400">AI</span>
                 <span className="text-[10px] font-medium bg-blue-950 text-blue-300 border border-blue-800 px-1.5 py-0.2 rounded font-mono">
                   v1.0
                 </span>
               </div>
-              <div className="text-[10px] text-zinc-400">NSE / BSE End-of-Day Workstation</div>
+              <div className="text-[10px] text-zinc-400">AI & Algorithmic Trading Workstation</div>
             </div>
           </div>
 

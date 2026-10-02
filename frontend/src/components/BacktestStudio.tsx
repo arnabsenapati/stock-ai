@@ -26,7 +26,9 @@ import {
   Zap,
   Layers,
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  Star,
+  ChevronDown
 } from 'lucide-react';
 import { BacktestResponse, OptimizationStatusResponse, StrategyBasketProfile } from '../types';
 
@@ -80,6 +82,44 @@ Sell = CrossUnder(Trend, 0)
   const [tradeFilter, setTradeFilter] = useState<'all' | 'wins' | 'losses'>('all');
 
   const [selectedPresetName, setSelectedPresetName] = useState<string>("SuperTrend + 100 SMA Trend Rider (Optimal)");
+  const [favorites, setFavorites] = useState<string[]>([
+    "SuperTrend + 100 SMA Trend Rider (Optimal)",
+    "Trend-Filtered RSI(2) Dip Buyer (Rank 1 - Larry Connors)"
+  ]);
+  const [isEditorExpanded, setIsEditorExpanded] = useState<boolean>(true);
+
+  // Load favorites from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('stock_ai_favorite_strategies');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setFavorites(parsed);
+        }
+      }
+    } catch (e) {
+      // silent
+    }
+  }, []);
+
+  const toggleFavorite = (strategyName: string) => {
+    setFavorites(prev => {
+      let next: string[];
+      if (prev.includes(strategyName)) {
+        next = prev.filter(name => name !== strategyName);
+      } else {
+        next = [strategyName, ...prev];
+      }
+      try {
+        localStorage.setItem('stock_ai_favorite_strategies', JSON.stringify(next));
+      } catch (e) {
+        // silent
+      }
+      return next;
+    });
+  };
+
   const [savedProfile, setSavedProfile] = useState<StrategyBasketProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState<boolean>(false);
   const [showOptModal, setShowOptModal] = useState<boolean>(false);
@@ -105,6 +145,57 @@ Sell = CrossUnder(Trend, 0)
   });
 
   const presets: Record<string, string> = {
+    "Trend-Filtered RSI(2) Dip Buyer (Rank 1 - Larry Connors)": `# Trend-Filtered RSI(2) Dip Buyer (Larry Connors - Score 92/100)
+# Rule 1: Macro Uptrend Filter (Above 200 SMA)
+MacroTrend = Close > SMA(Close, 200)
+
+# Rule 2: Extreme short-term statistical oversold condition (RSI(2) < 10)
+RSI2 = RSI(Close, 2)
+ExitSMA = SMA(Close, 5)
+
+Buy = MacroTrend & (RSI2 < 10) & (Close < ExitSMA)
+Sell = Cross(Close, ExitSMA) | (RSI2 > 70)
+`,
+    "Minervini VCP / Volatility Squeeze Breakout": `# Volatility Contraction Pattern (VCP / Squeeze Breakout - Score 84/100)
+Stage2 = (Close > SMA(Close, 100)) & (SMA(Close, 50) > SMA(Close, 100))
+VolComp = ATR(14) < ATR(14).rolling(30).mean() * 0.8
+Breakout = Close >= HHV(High, 20).shift(1)
+
+Buy = Stage2 & VolComp.shift(1) & Breakout & (Volume > 1.3 * SMA(Volume, 20))
+Sell = CrossUnder(Close, SMA(Close, 20))
+`,
+    "Stan Weinstein Stage 2 Base Breakout": `# Stan Weinstein Stage 2 Base Breakout (Score 82/100)
+SMA150 = SMA(Close, 150)
+SMA150_Rising = SMA150 > SMA150.shift(10)
+BaseBreakout = Close >= HHV(High, 60).shift(1)
+VolConfirm = Volume > 1.4 * SMA(Volume, 30)
+
+Buy = SMA150_Rising & (Close > SMA150) & BaseBreakout & VolConfirm
+Sell = CrossUnder(Close, SMA150)
+`,
+    "Bollinger Band %B Mean Reversion": `# Bollinger Band %B Re-entry in Uptrend (Score 81/100)
+MacroBull = Close > SMA(Close, 150)
+Lower = BB_Lower(Close, 20, 2.0)
+ReEntry = Cross(Close, Lower)
+
+Buy = MacroBull & ReEntry
+Sell = Cross(Close, SMA(Close, 20))
+`,
+    "3-Day Drop Pullback in Bull Trend": `# 3 Consecutive Down Days Pullback (Score 78/100)
+BullRegime = (Close > SMA(Close, 100)) & (SMA(Close, 50) > SMA(Close, 200))
+ThreeDown = (Close < Close.shift(1)) & (Close.shift(1) < Close.shift(2)) & (Close.shift(2) < Close.shift(3))
+
+Buy = BullRegime & ThreeDown & (RSI(Close, 14) < 45)
+Sell = Cross(Close, SMA(Close, 5))
+`,
+    "Toby Crabel NR7 Breakout": `# Toby Crabel NR7 (Narrow Range 7) Breakout (Score 74/100)
+DayRange = High - Low
+NR7 = DayRange == DayRange.rolling(7).min()
+TrendFilter = Close > SMA(Close, 50)
+
+Buy = TrendFilter & NR7.shift(1) & (Close > High.shift(1))
+Sell = CrossUnder(Close, SMA(Close, 10))
+`,
     "SuperTrend + 100 SMA Trend Rider (Optimal)": `# SuperTrend + 100 SMA Trend Rider (Optimal)
 MacroTrend = Close > SMA(Close, 100)
 Trend = SuperTrend_Trend(10, 3.0)
@@ -488,60 +579,473 @@ Sell = Close < LLV(Low, 10).shift(1)
     document.body.removeChild(link);
   };
 
+  const allPresetKeys = Object.keys(presets);
+  const favoritePresets = favorites.filter(name => allPresetKeys.includes(name));
+  const otherPresets = allPresetKeys.filter(name => !favorites.includes(name));
+
   return (
     <div className="flex-1 flex flex-col bg-[#0d1117] overflow-y-auto p-4 gap-4">
-      {/* Top Header & Strategy Config */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Code Editor Panel */}
-        <div className="lg:col-span-8 bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-3">
-            <div className="flex items-center gap-2">
-              <Code2 className="w-4 h-4 text-blue-400" />
-              <span className="text-sm font-semibold text-white">AmiBroker AFL / Python Strategy Studio</span>
+      {/* Main 2-Column Responsive Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+        {/* Left/Main Column: Strategy Studio + Simulation Results */}
+        <div className="lg:col-span-8 flex flex-col gap-4">
+          {/* Code Editor Panel */}
+          <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-blue-400" />
+                <span className="text-sm font-semibold text-white">Python Strategy Studio</span>
+              </div>
+
+              {/* Strategy Preset Selector + Favorite Star + Collapse Toggle */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-zinc-400">Presets:</span>
+                <select
+                  value={selectedPresetName}
+                  onChange={e => {
+                    const newName = e.target.value;
+                    setSelectedPresetName(newName);
+                    if (presets[newName]) {
+                      setStrategyCode(presets[newName]);
+                    }
+                  }}
+                  className="bg-[#0d1117] border border-zinc-700 text-xs text-zinc-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-blue-500 max-w-[260px] truncate"
+                >
+                  {favoritePresets.length > 0 && (
+                    <optgroup label="⭐ Favorite Strategies">
+                      {favoritePresets.map(name => (
+                        <option key={`fav-${name}`} value={name}>
+                          ⭐ {name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="All Strategies">
+                    {otherPresets.map(name => (
+                      <option key={`all-${name}`} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+
+                {/* Favorite Toggle Button */}
+                <button
+                  type="button"
+                  onClick={() => toggleFavorite(selectedPresetName)}
+                  className={`p-1.5 rounded-lg border transition-all flex items-center justify-center ${
+                    favorites.includes(selectedPresetName)
+                      ? 'bg-amber-950/80 border-amber-600/70 text-amber-400 hover:bg-amber-900 shadow-sm'
+                      : 'bg-[#0d1117] border-zinc-700 text-zinc-500 hover:text-amber-400 hover:border-zinc-600'
+                  }`}
+                  title={favorites.includes(selectedPresetName) ? "Remove from Favorites" : "Add to Favorites (pins to top)"}
+                >
+                  <Star className={`w-3.5 h-3.5 ${favorites.includes(selectedPresetName) ? 'fill-amber-400 text-amber-400' : ''}`} />
+                </button>
+
+                {/* Collapse/Expand Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setIsEditorExpanded(!isEditorExpanded)}
+                  className="p-1.5 rounded-lg bg-[#0d1117] border border-zinc-700 text-zinc-400 hover:text-white transition-colors"
+                  title={isEditorExpanded ? "Collapse Code Editor" : "Expand Code Editor"}
+                >
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isEditorExpanded ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
             </div>
 
-            {/* Strategy Preset Selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-400">Presets:</span>
-              <select
-                value={selectedPresetName}
-                onChange={e => {
-                  setSelectedPresetName(e.target.value);
-                  setStrategyCode(presets[e.target.value]);
-                }}
-                className="bg-[#0d1117] border border-zinc-700 text-xs text-zinc-200 rounded-lg px-2.5 py-1 focus:outline-none focus:border-blue-500"
-              >
-                {Object.keys(presets).map(name => (
-                  <option key={name} value={name}>{name}</option>
+            {/* Quick Favorite Chips */}
+            {favoritePresets.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-zinc-500 font-medium flex items-center gap-1">
+                  <Star className="w-3 h-3 fill-amber-400/80 text-amber-400/80" /> Favorites:
+                </span>
+                {favoritePresets.map(name => (
+                  <button
+                    key={`chip-${name}`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedPresetName(name);
+                      if (presets[name]) {
+                        setStrategyCode(presets[name]);
+                      }
+                    }}
+                    className={`px-2 py-0.5 rounded text-[10px] font-medium transition-all ${
+                      selectedPresetName === name
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50 shadow-sm'
+                        : 'bg-[#0d1117] text-zinc-400 border border-zinc-800 hover:text-zinc-200 hover:border-zinc-700'
+                    }`}
+                    title={name}
+                  >
+                    {name.split(' (')[0]}
+                  </button>
                 ))}
-              </select>
+              </div>
+            )}
+
+            {isEditorExpanded ? (
+              <>
+                <div className="relative">
+                  <textarea
+                    value={strategyCode}
+                    onChange={e => setStrategyCode(e.target.value)}
+                    rows={6}
+                    className="w-full bg-[#0d1117] border border-zinc-800 rounded-lg p-3 font-mono text-xs text-emerald-300 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                    spellCheck={false}
+                  />
+                </div>
+
+                <div className="text-[11px] text-zinc-500 flex flex-wrap gap-2">
+                  <span>Built-ins:</span>
+                  <code className="text-zinc-400">Close, Open, High, Low, Volume, DeliveryPct</code>
+                  <code className="text-zinc-400">EMA(series, period), SMA(), RSI(), ATR(), SuperTrend_Trend()</code>
+                  <code className="text-zinc-400">Cross(A, B), CrossUnder(A, B)</code>
+                </div>
+              </>
+            ) : (
+              <div className="flex items-center justify-between text-xs text-zinc-400 bg-[#0d1117] px-3 py-2 rounded-lg border border-zinc-800">
+                <span className="font-mono text-emerald-400 truncate">
+                  Active Strategy: {selectedPresetName}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsEditorExpanded(true)}
+                  className="text-blue-400 hover:text-blue-300 text-[11px] font-medium ml-2 shrink-0"
+                >
+                  Expand Editor
+                </button>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="p-3 bg-rose-950/60 border border-rose-800 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{error}</span>
             </div>
-          </div>
+          )}
 
-          <div className="relative">
-            <textarea
-              value={strategyCode}
-              onChange={e => setStrategyCode(e.target.value)}
-              rows={6}
-              className="w-full bg-[#0d1117] border border-zinc-800 rounded-lg p-3 font-mono text-xs text-emerald-300 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
-              spellCheck={false}
-            />
-          </div>
+          {/* Backtest Results Dashboard or Empty Ready State */}
+          {result ? (
+            <div className="space-y-4">
+              {/* Header with Execution Timing Badge */}
+              <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 border-b border-zinc-800/80">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-white tracking-wide">Simulation Results</span>
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 ${
+                    result.execution_timing === 'next_open'
+                      ? 'bg-emerald-950/80 border-emerald-600/70 text-emerald-300'
+                      : 'bg-blue-950/80 border-blue-600/70 text-blue-300'
+                  }`}>
+                    {result.execution_timing === 'next_open' 
+                      ? '🌅 Filled at Next Day Open (9:15 AM - Zero Lookahead)' 
+                      : '🕒 Filled at Same Day Close (3:20 PM - MOC Order)'}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 ${
+                    result.compounding !== false
+                      ? 'bg-purple-950/80 border-purple-600/70 text-purple-300'
+                      : 'bg-zinc-800/80 border-zinc-600/70 text-zinc-300'
+                  }`}>
+                    {result.compounding !== false 
+                      ? '🚀 Compounding (% Equity)' 
+                      : '🛡️ Fixed Capital (Linear)'}
+                  </span>
+                  {result.partial_tp_pct && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 bg-amber-950/80 border-amber-600/70 text-amber-300">
+                      ⚡ Scale-Out: {result.partial_tp_ratio ?? 50}% @ +{result.partial_tp_pct}%
+                    </span>
+                  )}
+                  {result.regime_filter && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 bg-cyan-950/80 border-cyan-600/70 text-cyan-300">
+                      🛡️ Cash Defense: {result.regime_rule?.toUpperCase().replace('_', ' ')} ({result.metrics.regime_blocked_days ?? 0}d Cash / {result.metrics.regime_filtered_entries ?? 0} Filtered)
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-zinc-400 font-mono">
+                    ₹{result.metrics.initial_capital.toLocaleString()} Initial → ₹{result.metrics.final_equity.toLocaleString()} Equity
+                  </span>
+                  <button
+                    onClick={handleExportTradesCSV}
+                    className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[11px] font-semibold flex items-center gap-1.5 transition-all border border-zinc-700 shadow-sm"
+                    title="Download full trades log in CSV"
+                  >
+                    <Download className="w-3.5 h-3.5 text-blue-400" /> Export CSV
+                  </button>
+                </div>
+              </div>
 
-          <div className="text-[11px] text-zinc-500 flex flex-wrap gap-2">
-            <span>Built-ins:</span>
-            <code className="text-zinc-400">Close, Open, High, Low, Volume, DeliveryPct</code>
-            <code className="text-zinc-400">EMA(series, period), SMA(), RSI(), ATR(), SuperTrend_Trend()</code>
-            <code className="text-zinc-400">Cross(A, B), CrossUnder(A, B)</code>
-          </div>
+              {/* Regime Defense Informational Banner */}
+              {result.regime_filter && (
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-cyan-950/30 border border-cyan-800/50 text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-xl">🛡️</span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-cyan-200">Market Regime Cash Protection Active</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-900/60 border border-cyan-600/60 text-cyan-200">
+                          {result.regime_index_symbol ?? '^NSEI'} &gt; {result.regime_rule?.toUpperCase().replace('_', ' ')}
+                        </span>
+                      </div>
+                      <p className="text-zinc-400 text-[11px] mt-0.5 leading-relaxed">
+                        Defended capital by staying in cash for <strong>{result.metrics.regime_blocked_days ?? 0} trading days</strong> and filtering out <strong>{result.metrics.regime_filtered_entries ?? 0} false breakout entries</strong> during broad index downtrends.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="text-right">
+                      <span className="text-[10px] text-zinc-400 block uppercase">Win Rate Under Defense</span>
+                      <span className="text-sm font-bold font-mono text-cyan-300">{result.metrics.win_rate_pct}%</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* KPI Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 xl:grid-cols-5 2xl:grid-cols-9 gap-2.5">
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Net Profit</span>
+                  <span className={`text-base font-bold font-mono ${result.metrics.net_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    ₹{result.metrics.net_profit.toLocaleString()}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">
+                    {result.metrics.total_return_pct}% return
+                  </span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">CAGR %</span>
+                  <span className="text-base font-bold font-mono text-zinc-200">
+                    {result.metrics.cagr_pct}%
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">Annualized</span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Sharpe Ratio</span>
+                  <span className="text-base font-bold font-mono text-zinc-200">
+                    {result.metrics.sharpe_ratio}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">Rf 6.5%</span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Max Drawdown</span>
+                  <span className="text-base font-bold font-mono text-rose-400">
+                    -{result.metrics.max_drawdown_pct}%
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">Peak to trough</span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Win Rate</span>
+                  <span className="text-base font-bold font-mono text-emerald-400">
+                    {result.metrics.win_rate_pct}%
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">{result.metrics.winning_trades}W / {result.metrics.losing_trades}L</span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Total Trades</span>
+                  <span className="text-base font-bold font-mono text-zinc-200">
+                    {result.metrics.total_trades}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">Completed</span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Total Traded</span>
+                  <span className="text-base font-bold font-mono text-blue-400">
+                    ₹{(result.metrics.total_traded_value ?? result.trades.reduce((s, t) => s + (t.trade_value ?? (t.entry_price * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block truncate" title={`Turnover: ₹${(result.metrics.total_turnover ?? result.trades.reduce((s, t) => s + (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}>
+                    Turnover: ₹{(result.metrics.total_turnover ?? result.trades.reduce((s, t) => s + (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Profit Factor</span>
+                  <span className="text-base font-bold font-mono text-zinc-200">
+                    {result.metrics.profit_factor}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">Gross P/L ratio</span>
+                </div>
+
+                <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-400 block uppercase">Avg Holding</span>
+                  <span className="text-base font-bold font-mono text-zinc-200">
+                    {result.metrics.avg_holding_days} d
+                  </span>
+                  <span className="text-[10px] text-zinc-500 block">Per trade</span>
+                </div>
+              </div>
+
+              {/* Equity Curve SVG Chart */}
+              <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-blue-400" /> Cumulative Portfolio Equity Curve
+                  </span>
+                  <span className="text-xs font-mono text-zinc-400">
+                    End Equity: <strong className="text-emerald-400">₹{result.metrics.final_equity.toLocaleString()}</strong>
+                  </span>
+                </div>
+
+                {/* Simple Dynamic SVG Curve */}
+                {result.equity_curve.length > 1 && (
+                  <div className="w-full h-48 bg-[#0d1117] rounded-lg p-2 relative overflow-hidden flex items-end">
+                    <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${result.equity_curve.length} 100`} preserveAspectRatio="none">
+                      {(() => {
+                        const minEq = Math.min(...result.equity_curve.map(e => e.equity));
+                        const maxEq = Math.max(...result.equity_curve.map(e => e.equity));
+                        const range = maxEq - minEq || 1;
+                        const points = result.equity_curve.map((e, idx) => {
+                          const x = idx;
+                          const y = 95 - ((e.equity - minEq) / range) * 90;
+                          return `${x},${y}`;
+                        }).join(' ');
+
+                        return (
+                          <>
+                            <polyline
+                              fill="none"
+                              stroke="#38bdf8"
+                              strokeWidth="1.8"
+                              points={points}
+                            />
+                          </>
+                        );
+                      })()}
+                    </svg>
+                  </div>
+                )}
+              </div>
+
+              {/* Trade Log Table */}
+              <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Award className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-semibold text-white uppercase tracking-wider">
+                      Detailed Trade Execution Log ({filteredTrades.length} Trades • Total Traded Value: ₹{totalFilteredTradeValue.toLocaleString(undefined, { maximumFractionDigits: 0 })})
+                    </span>
+                  </div>
+
+                  {/* Filters */}
+                  <div className="flex items-center gap-1 bg-[#0d1117] rounded-lg p-0.5 border border-zinc-800 text-xs">
+                    {(['all', 'wins', 'losses'] as const).map(f => (
+                      <button
+                        key={f}
+                        onClick={() => setTradeFilter(f)}
+                        className={`px-2 py-0.5 rounded capitalize ${tradeFilter === f ? 'bg-zinc-700 text-white' : 'text-zinc-400'}`}
+                      >
+                        {f}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="text-[10px] text-zinc-500 uppercase bg-[#0d1117] border-b border-zinc-800">
+                      <tr>
+                        <th className="p-2.5">Symbol</th>
+                        <th className="p-2.5">Entry Date</th>
+                        <th className="p-2.5">Exit Date</th>
+                        <th className="p-2.5">Entry (₹)</th>
+                        <th className="p-2.5">Exit (₹)</th>
+                        <th className="p-2.5">Qty</th>
+                        <th className="p-2.5">Traded Value (₹)</th>
+                        <th className="p-2.5">PnL (₹)</th>
+                        <th className="p-2.5">Return %</th>
+                        <th className="p-2.5">Hold Days</th>
+                        <th className="p-2.5">Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/40 text-zinc-300">
+                      {filteredTrades.map((t, idx) => (
+                        <tr key={idx} className="hover:bg-zinc-800/30">
+                          <td className="p-2.5 font-bold text-white">{t.symbol}</td>
+                          <td className="p-2.5 text-zinc-400">{t.entry_date}</td>
+                          <td className="p-2.5 text-zinc-400">{t.exit_date}</td>
+                          <td className="p-2.5">₹{t.entry_price.toFixed(2)}</td>
+                          <td className="p-2.5">₹{t.exit_price.toFixed(2)}</td>
+                          <td className="p-2.5">{t.qty}</td>
+                          <td className="p-2.5 font-mono text-zinc-200">
+                            <div>₹{(t.trade_value ?? (t.entry_price * t.qty)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                            <div className="text-[10px] text-zinc-500">Turnover: ₹{(t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                          </td>
+                          <td className={`p-2.5 font-semibold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {t.pnl >= 0 ? '+' : ''}₹{t.pnl.toFixed(2)}
+                          </td>
+                          <td className={`p-2.5 font-semibold ${t.return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {t.return_pct >= 0 ? '+' : ''}{t.return_pct.toFixed(2)}%
+                          </td>
+                          <td className="p-2.5 text-[11px]">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                              t.exit_reason?.includes('Partial')
+                                ? 'bg-amber-950/80 text-amber-300 border border-amber-800/60'
+                                : t.exit_reason?.includes('Breakeven')
+                                ? 'bg-blue-950/80 text-blue-300 border border-blue-800/60'
+                                : t.exit_reason?.includes('Runner')
+                                ? 'bg-purple-950/80 text-purple-300 border border-purple-800/60'
+                                : t.exit_reason?.includes('Take Profit')
+                                ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
+                                : t.exit_reason?.includes('Stop Loss')
+                                ? 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
+                                : 'text-zinc-400'
+                            }`}>
+                              {t.exit_reason}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredTrades.length === 0 && (
+                        <tr>
+                          <td colSpan={11} className="p-6 text-center text-zinc-500 font-sans">
+                            No completed trades recorded for this strategy configuration.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-[#161b22]/40 border border-dashed border-zinc-800 rounded-xl p-8 flex flex-col items-center justify-center text-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600/20 to-indigo-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 shadow-inner">
+                <Play className="w-5 h-5 fill-current ml-0.5" />
+              </div>
+              <div className="max-w-md">
+                <h3 className="text-sm font-semibold text-white">Backtest Simulation Ready</h3>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  Select your strategy formula and target universe, adjust capital and stops on the right, and click <span className="text-blue-400 font-semibold">Execute Vectorized Backtest</span>. Simulation KPIs, portfolio equity curve, and detailed trade execution logs will appear right here.
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2 pt-1 text-[11px] text-zinc-400">
+                <span className="px-2.5 py-1 rounded-md bg-[#0d1117] border border-zinc-800">⚡ Vectorized DuckDB Engine</span>
+                <span className="px-2.5 py-1 rounded-md bg-[#0d1117] border border-zinc-800">📊 Zero Lookahead Execution</span>
+                <span className="px-2.5 py-1 rounded-md bg-[#0d1117] border border-zinc-800">🛡️ Regime Cash Protection</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Execution & Risk Control Panel */}
-        <div className="lg:col-span-4 bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col justify-between gap-3">
-          <div className="flex items-center gap-2 border-b border-zinc-800 pb-2">
-            <Sliders className="w-4 h-4 text-purple-400" />
-            <span className="text-sm font-semibold text-white">Backtest Settings</span>
+        <div className="lg:col-span-4 lg:sticky lg:top-0 lg:max-h-[calc(100vh-5.5rem)] self-start bg-[#161b22] border border-zinc-800 rounded-xl flex flex-col overflow-hidden shadow-xl">
+          {/* Fixed Header */}
+          <div className="p-3.5 pb-2.5 border-b border-zinc-800/80 flex items-center justify-between shrink-0 bg-[#161b22]">
+            <div className="flex items-center gap-2">
+              <Sliders className="w-4 h-4 text-purple-400" />
+              <span className="text-sm font-semibold text-white">Backtest Settings</span>
+            </div>
+            <span className="text-[10px] text-zinc-500 font-mono">Portfolio & Risk</span>
           </div>
+
+          {/* Scrollable Settings Form Body */}
+          <div className="flex-1 overflow-y-auto p-3.5 space-y-3 custom-scrollbar">
 
           {/* Mode Switcher */}
           <div className="flex items-center bg-[#0d1117] rounded-lg p-0.5 border border-zinc-800 text-xs">
@@ -947,318 +1451,25 @@ Sell = Close < LLV(Low, 10).shift(1)
               <span>Save Preset</span>
             </button>
           </div>
+        </div>
 
-          {/* Run Button */}
-          <button
-            onClick={handleRunBacktest}
-            disabled={loading}
-            className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-900/30 transition-all disabled:opacity-50"
-          >
-            {loading ? (
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Play className="w-3.5 h-3.5 fill-current" />
-            )}
-            {loading ? 'Simulating Strategy...' : 'Execute Vectorized Backtest'}
-          </button>
+        {/* Fixed / Pinned Bottom Action Button */}
+        <div className="p-3 bg-[#161b22] border-t border-zinc-800/80 shrink-0">
+            <button
+              onClick={handleRunBacktest}
+              disabled={loading}
+              className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-lg font-semibold text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-900/30 transition-all disabled:opacity-50 cursor-pointer"
+            >
+              {loading ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Play className="w-3.5 h-3.5 fill-current" />
+              )}
+              {loading ? 'Simulating Strategy...' : 'Execute Vectorized Backtest'}
+            </button>
+          </div>
         </div>
       </div>
-
-      {error && (
-        <div className="p-3 bg-rose-950/60 border border-rose-800 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-          <ShieldAlert className="w-4 h-4 shrink-0 text-rose-400" />
-          <span>{error}</span>
-        </div>
-      )}
-
-      {/* Backtest Results Dashboard */}
-      {result && (
-        <div className="space-y-4">
-          {/* Header with Execution Timing Badge */}
-          <div className="flex flex-wrap items-center justify-between gap-2 px-1 pb-1 border-b border-zinc-800/80">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-white tracking-wide">Simulation Results</span>
-              <span className={`px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 ${
-                result.execution_timing === 'next_open'
-                  ? 'bg-emerald-950/80 border-emerald-600/70 text-emerald-300'
-                  : 'bg-blue-950/80 border-blue-600/70 text-blue-300'
-              }`}>
-                {result.execution_timing === 'next_open' 
-                  ? '🌅 Filled at Next Day Open (9:15 AM - Zero Lookahead)' 
-                  : '🕒 Filled at Same Day Close (3:20 PM - MOC Order)'}
-              </span>
-              <span className={`px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 ${
-                result.compounding !== false
-                  ? 'bg-purple-950/80 border-purple-600/70 text-purple-300'
-                  : 'bg-zinc-800/80 border-zinc-600/70 text-zinc-300'
-              }`}>
-                {result.compounding !== false 
-                  ? '🚀 Compounding (% Equity)' 
-                  : '🛡️ Fixed Capital (Linear)'}
-              </span>
-              {result.partial_tp_pct && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 bg-amber-950/80 border-amber-600/70 text-amber-300">
-                  ⚡ Scale-Out: {result.partial_tp_ratio ?? 50}% @ +{result.partial_tp_pct}%
-                </span>
-              )}
-              {result.regime_filter && (
-                <span className="px-2 py-0.5 rounded text-[11px] font-mono border font-semibold flex items-center gap-1 bg-cyan-950/80 border-cyan-600/70 text-cyan-300">
-                  🛡️ Cash Defense: {result.regime_rule?.toUpperCase().replace('_', ' ')} ({result.metrics.regime_blocked_days ?? 0}d Cash / {result.metrics.regime_filtered_entries ?? 0} Filtered)
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[11px] text-zinc-400 font-mono">
-                ₹{result.metrics.initial_capital.toLocaleString()} Initial → ₹{result.metrics.final_equity.toLocaleString()} Equity
-              </span>
-              <button
-                onClick={handleExportTradesCSV}
-                className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-[11px] font-semibold flex items-center gap-1.5 transition-all border border-zinc-700 shadow-sm"
-                title="Download full trades log in CSV"
-              >
-                <Download className="w-3.5 h-3.5 text-blue-400" /> Export CSV
-              </button>
-            </div>
-          </div>
-
-          {/* Regime Defense Informational Banner */}
-          {result.regime_filter && (
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-cyan-950/30 border border-cyan-800/50 text-xs">
-              <div className="flex items-center gap-2.5">
-                <span className="text-xl">🛡️</span>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-cyan-200">Market Regime Cash Protection Active</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-900/60 border border-cyan-600/60 text-cyan-200">
-                      {result.regime_index_symbol ?? '^NSEI'} &gt; {result.regime_rule?.toUpperCase().replace('_', ' ')}
-                    </span>
-                  </div>
-                  <p className="text-zinc-400 text-[11px] mt-0.5 leading-relaxed">
-                    Defended capital by staying in cash for <strong>{result.metrics.regime_blocked_days ?? 0} trading days</strong> and filtering out <strong>{result.metrics.regime_filtered_entries ?? 0} false breakout entries</strong> during broad index downtrends.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <div className="text-right">
-                  <span className="text-[10px] text-zinc-400 block uppercase">Win Rate Under Defense</span>
-                  <span className="text-sm font-bold font-mono text-cyan-300">{result.metrics.win_rate_pct}%</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-3">
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Net Profit</span>
-              <span className={`text-base font-bold font-mono ${result.metrics.net_profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                ₹{result.metrics.net_profit.toLocaleString()}
-              </span>
-              <span className="text-[10px] text-zinc-500 block">
-                {result.metrics.total_return_pct}% return
-              </span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">CAGR %</span>
-              <span className="text-base font-bold font-mono text-zinc-200">
-                {result.metrics.cagr_pct}%
-              </span>
-              <span className="text-[10px] text-zinc-500 block">Annualized</span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Sharpe Ratio</span>
-              <span className="text-base font-bold font-mono text-zinc-200">
-                {result.metrics.sharpe_ratio}
-              </span>
-              <span className="text-[10px] text-zinc-500 block">Rf 6.5%</span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Max Drawdown</span>
-              <span className="text-base font-bold font-mono text-rose-400">
-                -{result.metrics.max_drawdown_pct}%
-              </span>
-              <span className="text-[10px] text-zinc-500 block">Peak to trough</span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Win Rate</span>
-              <span className="text-base font-bold font-mono text-emerald-400">
-                {result.metrics.win_rate_pct}%
-              </span>
-              <span className="text-[10px] text-zinc-500 block">{result.metrics.winning_trades}W / {result.metrics.losing_trades}L</span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Total Trades</span>
-              <span className="text-base font-bold font-mono text-zinc-200">
-                {result.metrics.total_trades}
-              </span>
-              <span className="text-[10px] text-zinc-500 block">Completed</span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Total Traded</span>
-              <span className="text-base font-bold font-mono text-blue-400">
-                ₹{(result.metrics.total_traded_value ?? result.trades.reduce((s, t) => s + (t.trade_value ?? (t.entry_price * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </span>
-              <span className="text-[10px] text-zinc-500 block truncate" title={`Turnover: ₹${(result.metrics.total_turnover ?? result.trades.reduce((s, t) => s + (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}>
-                Turnover: ₹{(result.metrics.total_turnover ?? result.trades.reduce((s, t) => s + (t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-              </span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Profit Factor</span>
-              <span className="text-base font-bold font-mono text-zinc-200">
-                {result.metrics.profit_factor}
-              </span>
-              <span className="text-[10px] text-zinc-500 block">Gross P/L ratio</span>
-            </div>
-
-            <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-3">
-              <span className="text-[10px] text-zinc-400 block uppercase">Avg Holding</span>
-              <span className="text-base font-bold font-mono text-zinc-200">
-                {result.metrics.avg_holding_days} d
-              </span>
-              <span className="text-[10px] text-zinc-500 block">Per trade</span>
-            </div>
-          </div>
-
-          {/* Equity Curve SVG Chart */}
-          <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
-                <TrendingUp className="w-3.5 h-3.5 text-blue-400" /> Cumulative Portfolio Equity Curve
-              </span>
-              <span className="text-xs font-mono text-zinc-400">
-                End Equity: <strong className="text-emerald-400">₹{result.metrics.final_equity.toLocaleString()}</strong>
-              </span>
-            </div>
-
-            {/* Simple Dynamic SVG Curve */}
-            {result.equity_curve.length > 1 && (
-              <div className="w-full h-48 bg-[#0d1117] rounded-lg p-2 relative overflow-hidden flex items-end">
-                <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${result.equity_curve.length} 100`} preserveAspectRatio="none">
-                  {(() => {
-                    const minEq = Math.min(...result.equity_curve.map(e => e.equity));
-                    const maxEq = Math.max(...result.equity_curve.map(e => e.equity));
-                    const range = maxEq - minEq || 1;
-                    const points = result.equity_curve.map((e, idx) => {
-                      const x = idx;
-                      const y = 95 - ((e.equity - minEq) / range) * 90;
-                      return `${x},${y}`;
-                    }).join(' ');
-
-                    return (
-                      <>
-                        <polyline
-                          fill="none"
-                          stroke="#38bdf8"
-                          strokeWidth="1.8"
-                          points={points}
-                        />
-                      </>
-                    );
-                  })()}
-                </svg>
-              </div>
-            )}
-          </div>
-
-          {/* Trade Log Table */}
-          <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800 pb-2">
-              <div className="flex items-center gap-2">
-                <Award className="w-4 h-4 text-emerald-400" />
-                <span className="text-xs font-semibold text-white uppercase tracking-wider">
-                  Detailed Trade Execution Log ({filteredTrades.length} Trades • Total Traded Value: ₹{totalFilteredTradeValue.toLocaleString(undefined, { maximumFractionDigits: 0 })})
-                </span>
-              </div>
-
-              {/* Filters */}
-              <div className="flex items-center gap-1 bg-[#0d1117] rounded-lg p-0.5 border border-zinc-800 text-xs">
-                {(['all', 'wins', 'losses'] as const).map(f => (
-                  <button
-                    key={f}
-                    onClick={() => setTradeFilter(f)}
-                    className={`px-2 py-0.5 rounded capitalize ${tradeFilter === f ? 'bg-zinc-700 text-white' : 'text-zinc-400'}`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono">
-                <thead className="text-[10px] text-zinc-500 uppercase bg-[#0d1117] border-b border-zinc-800">
-                  <tr>
-                    <th className="p-2.5">Symbol</th>
-                    <th className="p-2.5">Entry Date</th>
-                    <th className="p-2.5">Exit Date</th>
-                    <th className="p-2.5">Entry (₹)</th>
-                    <th className="p-2.5">Exit (₹)</th>
-                    <th className="p-2.5">Qty</th>
-                    <th className="p-2.5">Traded Value (₹)</th>
-                    <th className="p-2.5">PnL (₹)</th>
-                    <th className="p-2.5">Return %</th>
-                    <th className="p-2.5">Hold Days</th>
-                    <th className="p-2.5">Reason</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-800/40 text-zinc-300">
-                  {filteredTrades.map((t, idx) => (
-                    <tr key={idx} className="hover:bg-zinc-800/30">
-                      <td className="p-2.5 font-bold text-white">{t.symbol}</td>
-                      <td className="p-2.5 text-zinc-400">{t.entry_date}</td>
-                      <td className="p-2.5 text-zinc-400">{t.exit_date}</td>
-                      <td className="p-2.5">₹{t.entry_price.toFixed(2)}</td>
-                      <td className="p-2.5">₹{t.exit_price.toFixed(2)}</td>
-                      <td className="p-2.5">{t.qty}</td>
-                      <td className="p-2.5 font-mono text-zinc-200">
-                        <div>₹{(t.trade_value ?? (t.entry_price * t.qty)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        <div className="text-[10px] text-zinc-500">Turnover: ₹{(t.turnover ?? ((t.entry_price + t.exit_price) * t.qty)).toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
-                      </td>
-                      <td className={`p-2.5 font-semibold ${t.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {t.pnl >= 0 ? '+' : ''}₹{t.pnl.toFixed(2)}
-                      </td>
-                      <td className={`p-2.5 font-semibold ${t.return_pct >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {t.return_pct >= 0 ? '+' : ''}{t.return_pct.toFixed(2)}%
-                      </td>
-                      <td className="p-2.5 text-[11px]">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
-                          t.exit_reason?.includes('Partial')
-                            ? 'bg-amber-950/80 text-amber-300 border border-amber-800/60'
-                            : t.exit_reason?.includes('Breakeven')
-                            ? 'bg-blue-950/80 text-blue-300 border border-blue-800/60'
-                            : t.exit_reason?.includes('Runner')
-                            ? 'bg-purple-950/80 text-purple-300 border border-purple-800/60'
-                            : t.exit_reason?.includes('Take Profit')
-                            ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800/60'
-                            : t.exit_reason?.includes('Stop Loss')
-                            ? 'bg-rose-950/80 text-rose-300 border border-rose-800/60'
-                            : 'text-zinc-400'
-                        }`}>
-                          {t.exit_reason}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredTrades.length === 0 && (
-                    <tr>
-                      <td colSpan={11} className="p-6 text-center text-zinc-500 font-sans">
-                        No completed trades recorded for this strategy configuration.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Optimization Modal */}
       {showOptModal && (

@@ -22,10 +22,10 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "AmiBroker Terminal - AI & Algorithmic Trading",
+  title: "Stock AI - Algorithmic Trading & Quantitative Analytics",
   description: "NSE / BSE End-of-Day Quantitative Workstation & Optimizer",
   manifest: "/manifest.webmanifest",
-  applicationName: "Stock AI Terminal",
+  applicationName: "Stock AI",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

@@ -134,7 +134,7 @@ class BhavcopyDownloader:
         return False
 
     def ingest_custom_csv(self, file_path: str) -> Dict[str, Any]:
-        """Import user CSV (AmiBroker or custom EOD export)"""
+        """Import user CSV (custom EOD data or external export)"""
         df = pd.read_csv(file_path)
         df.columns = [c.strip().lower() for c in df.columns]
         

@@ -2,7 +2,7 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'AmiBroker Terminal - Stock AI',
+    name: 'Stock AI - Algorithmic Trading & Analytics',
     short_name: 'Stock AI',
     description: 'NSE / BSE End-of-Day Quantitative Workstation & Optimizer',
     start_url: '/',
@@ -45,7 +45,7 @@ export default function manifest(): MetadataRoute.Manifest {
       {
         name: 'Backtest Studio',
         url: '/?tab=backtest',
-        description: 'Run Quantitative AFL / Python Backtests',
+        description: 'Run Quantitative Python Backtests',
       },
       {
         name: 'EOD Screener',

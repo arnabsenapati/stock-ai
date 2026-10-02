@@ -4,7 +4,7 @@ from typing import Dict, Any, Tuple, Optional
 from backend.analytics.indicators import ta
 
 class StrategyContext:
-    """Helper environment for AmiBroker AFL / Python formulas"""
+    """Helper environment for Python strategy formulas"""
     def __init__(self, df: pd.DataFrame):
         self.df = df
         self.Open = df['open']
@@ -66,9 +66,25 @@ class StrategyContext:
             b = pd.Series(b, index=a.index)
         return (a < b) & (a.shift(1) >= b.shift(1))
 
+    def BB_Upper(self, series: Optional[pd.Series] = None, period: int = 20, std_dev: float = 2.0) -> pd.Series:
+        s = self.Close if series is None else series
+        return ta.bollinger_bands(s, period, std_dev)['bb_upper']
+
+    def BB_Lower(self, series: Optional[pd.Series] = None, period: int = 20, std_dev: float = 2.0) -> pd.Series:
+        s = self.Close if series is None else series
+        return ta.bollinger_bands(s, period, std_dev)['bb_lower']
+
+    def BB_PctB(self, series: Optional[pd.Series] = None, period: int = 20, std_dev: float = 2.0) -> pd.Series:
+        s = self.Close if series is None else series
+        return ta.bollinger_bands(s, period, std_dev)['bb_pct_b']
+
+    def BB_Bandwidth(self, series: Optional[pd.Series] = None, period: int = 20, std_dev: float = 2.0) -> pd.Series:
+        s = self.Close if series is None else series
+        return ta.bollinger_bands(s, period, std_dev)['bb_bandwidth']
+
 
 class StrategyEvaluator:
-    """Evaluates user AFL/Python strategy code securely on a stock DataFrame"""
+    """Evaluates user Python strategy code securely on a stock DataFrame"""
 
     @staticmethod
     def evaluate(code: str, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
@@ -97,6 +113,10 @@ class StrategyEvaluator:
             'SuperTrend_Trend': ctx.SuperTrend_Trend,
             'HHV': ctx.HHV,
             'LLV': ctx.LLV,
+            'BB_Upper': ctx.BB_Upper,
+            'BB_Lower': ctx.BB_Lower,
+            'BB_PctB': ctx.BB_PctB,
+            'BB_Bandwidth': ctx.BB_Bandwidth,
             'Cross': ctx.Cross,
             'CrossUnder': ctx.CrossUnder,
             'Buy': pd.Series(False, index=df.index),
@@ -107,7 +127,7 @@ class StrategyEvaluator:
             'np': np,
         }
 
-        # Clean code syntax to support AFL-like semicolon lines if present
+        # Clean code syntax (strip trailing semicolons or comments if present)
         clean_lines = []
         for line in code.split("\n"):
             stripped = line.strip().rstrip(";")
@@ -132,6 +152,17 @@ class StrategyEvaluator:
 
 # Standard Strategy Presets
 PRESET_STRATEGIES = {
+    "Trend-Filtered RSI(2) Dip Buyer (Rank 1 - Larry Connors)": """# Trend-Filtered RSI(2) Dip Buyer (Larry Connors - Score 92/100)
+# Rule 1: Macro Uptrend Filter (Above 200 SMA)
+MacroTrend = Close > SMA(Close, 200)
+
+# Rule 2: Extreme short-term statistical oversold condition (RSI(2) < 10)
+RSI2 = RSI(Close, 2)
+ExitSMA = SMA(Close, 5)
+
+Buy = MacroTrend & (RSI2 < 10) & (Close < ExitSMA)
+Sell = Cross(Close, ExitSMA) | (RSI2 > 70)
+""",
     "SuperTrend + 100 SMA Trend Rider (Optimal)": """# SuperTrend + 100 SMA Trend Rider (Optimal)
 MacroTrend = Close > SMA(Close, 100)
 Trend = SuperTrend_Trend(10, 3.0)
@@ -151,6 +182,46 @@ Buy = MacroTrend & TrendFlip
 
 # Rule 4: Exit when intermediate trend turns bearish or breaks 50 EMA
 Sell = CrossUnder(Trend, 0) | CrossUnder(Close, EMA(Close, 50))
+""",
+    "Minervini VCP / Volatility Squeeze Breakout": """# Volatility Contraction Pattern (VCP / Squeeze Breakout - Score 84/100)
+Stage2 = (Close > SMA(Close, 100)) & (SMA(Close, 50) > SMA(Close, 100))
+VolComp = ATR(14) < ATR(14).rolling(30).mean() * 0.8
+Breakout = Close >= HHV(High, 20).shift(1)
+
+Buy = Stage2 & VolComp.shift(1) & Breakout & (Volume > 1.3 * SMA(Volume, 20))
+Sell = CrossUnder(Close, SMA(Close, 20))
+""",
+    "Stan Weinstein Stage 2 Base Breakout": """# Stan Weinstein Stage 2 Base Breakout (Score 82/100)
+SMA150 = SMA(Close, 150)
+SMA150_Rising = SMA150 > SMA150.shift(10)
+BaseBreakout = Close >= HHV(High, 60).shift(1)
+VolConfirm = Volume > 1.4 * SMA(Volume, 30)
+
+Buy = SMA150_Rising & (Close > SMA150) & BaseBreakout & VolConfirm
+Sell = CrossUnder(Close, SMA150)
+""",
+    "Bollinger Band %B Mean Reversion": """# Bollinger Band %B Re-entry in Uptrend (Score 81/100)
+MacroBull = Close > SMA(Close, 150)
+Lower = BB_Lower(Close, 20, 2.0)
+ReEntry = Cross(Close, Lower)
+
+Buy = MacroBull & ReEntry
+Sell = Cross(Close, SMA(Close, 20))
+""",
+    "3-Day Drop Pullback in Bull Trend": """# 3 Consecutive Down Days Pullback (Score 78/100)
+BullRegime = (Close > SMA(Close, 100)) & (SMA(Close, 50) > SMA(Close, 200))
+ThreeDown = (Close < Close.shift(1)) & (Close.shift(1) < Close.shift(2)) & (Close.shift(2) < Close.shift(3))
+
+Buy = BullRegime & ThreeDown & (RSI(Close, 14) < 45)
+Sell = Cross(Close, SMA(Close, 5))
+""",
+    "Toby Crabel NR7 Breakout": """# Toby Crabel NR7 (Narrow Range 7) Breakout (Score 74/100)
+DayRange = High - Low
+NR7 = DayRange == DayRange.rolling(7).min()
+TrendFilter = Close > SMA(Close, 50)
+
+Buy = TrendFilter & NR7.shift(1) & (Close > High.shift(1))
+Sell = CrossUnder(Close, SMA(Close, 10))
 """,
     "Golden Cross (SMA 50 / 200)": """# Golden Cross with RSI Momentum Filter
 Buy = Cross(SMA(Close, 50), SMA(Close, 200)) & (RSI(Close, 14) > 50)

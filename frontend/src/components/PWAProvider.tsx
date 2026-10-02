@@ -170,7 +170,7 @@ export function PWAProvider({ children }: { children: React.ReactNode }) {
         <div className="bg-blue-600 text-white text-xs px-4 py-1.5 flex items-center justify-between z-50 shadow-md select-none">
           <div className="flex items-center gap-2">
             <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            <span>A new version of AmiBroker Terminal is available!</span>
+            <span>A new version of Stock AI is available!</span>
           </div>
           <button
             onClick={updateApp}
@@ -207,7 +207,7 @@ export function PWAInstallButton() {
     <button
       onClick={installApp}
       className="flex items-center gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium px-3 py-1 rounded-lg text-xs transition shadow-md shadow-blue-900/30 cursor-pointer animate-pulse"
-      title="Install AmiBroker Terminal to your desktop or device"
+      title="Install Stock AI to your desktop or device"
     >
       <Download className="w-3.5 h-3.5" />
       <span>Install App</span>

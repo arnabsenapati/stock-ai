@@ -1,0 +1,21 @@
+{
+  "strategy_name": "Dual SuperTrend Momentum (Fast Trigger + Macro Anchor)",
+  "universe": "Nifty 50",
+  "initial_capital": 100000.0,
+  "risk_per_trade_pct": 20.0,
+  "stop_loss_pct": 15.0,
+  "take_profit_pct": 34.0,
+  "trailing_stop_pct": null,
+  "max_positions": 5,
+  "compounding": true,
+  "regime_filter": true,
+  "regime_rule": "sma_200",
+  "best_metric_name": "sharpe_ratio",
+  "best_metric_value": 0.44,
+  "total_trades": 133,
+  "win_rate": 0.0,
+  "total_return_pct": 67.41,
+  "max_drawdown_pct": 10.64,
+  "sharpe_ratio": 0.44,
+  "cagr_pct": 11.0
+}
