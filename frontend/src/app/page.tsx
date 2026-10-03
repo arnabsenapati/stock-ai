@@ -20,7 +20,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Zap,
-  Clock
+  Clock,
+  Briefcase
 } from 'lucide-react';
 
 import TradingChart from '../components/TradingChart';
@@ -28,11 +29,12 @@ import Watchlist from '../components/Watchlist';
 import BacktestStudio from '../components/BacktestStudio';
 import ScreenerView from '../components/ScreenerView';
 import DataHub from '../components/DataHub';
+import PortfolioStudio from '../components/PortfolioStudio';
 import { PWAInstallButton, usePWA } from '../components/PWAProvider';
 import { ChartDataResponse, SyncStatusResponse } from '../types';
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'chart' | 'backtest' | 'screener' | 'data'>('chart');
+  const [activeTab, setActiveTab] = useState<'chart' | 'portfolio' | 'backtest' | 'screener' | 'data'>('chart');
   const [selectedSymbol, setSelectedSymbol] = useState('RELIANCE');
   const [chartType, setChartType] = useState<'candlestick' | 'heikin_ashi' | 'renko' | 'line'>('candlestick');
   
@@ -51,8 +53,8 @@ export default function Home() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab');
-      if (tabParam && ['chart', 'backtest', 'screener', 'data'].includes(tabParam)) {
-        setActiveTab(tabParam as 'chart' | 'backtest' | 'screener' | 'data');
+      if (tabParam && ['chart', 'portfolio', 'backtest', 'screener', 'data'].includes(tabParam)) {
+        setActiveTab(tabParam as 'chart' | 'portfolio' | 'backtest' | 'screener' | 'data');
       }
     }
   }, []);
@@ -220,6 +222,16 @@ export default function Home() {
               <CandlestickChart className="w-3.5 h-3.5" /> Chart Studio
             </button>
             <button
+              onClick={() => setActiveTab('portfolio')}
+              className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'portfolio' 
+                  ? 'bg-blue-600 text-white shadow' 
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Briefcase className="w-3.5 h-3.5" /> Strategy Portfolio
+            </button>
+            <button
               onClick={() => setActiveTab('backtest')}
               className={`px-3 py-1.5 rounded-md flex items-center gap-1.5 transition-all cursor-pointer ${
                 activeTab === 'backtest' 
@@ -316,6 +328,13 @@ export default function Home() {
               />
             </div>
           </div>
+        )}
+
+        {activeTab === 'portfolio' && (
+          <PortfolioStudio
+            onSelectSymbol={handleSelectSymbolFromScreener}
+            availableSymbols={availableSymbols}
+          />
         )}
 
         {activeTab === 'backtest' && (

@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Filter, Zap, ExternalLink, TrendingUp, TrendingDown, Clock, ShieldCheck, CheckCircle2, Download } from 'lucide-react';
-import { ScreenerResponse, ScreenerMatch } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Filter, Zap, ExternalLink, TrendingUp, TrendingDown, Clock, ShieldCheck, ShieldAlert, CheckCircle2, Download, ChevronRight } from 'lucide-react';
+import { ScreenerResponse, ScreenerMatch, MarketRegimeStatus } from '../types';
 
 interface ScreenerViewProps {
   onSelectStock: (symbol: string) => void;
@@ -20,9 +20,35 @@ Buy = MacroTrend & Cross(Trend, 0)
 Sell = CrossUnder(Trend, 0)`
   );
   
+  // Market Regime Cash Protection State
+  const [enableRegimeFilter, setEnableRegimeFilter] = useState(true);
+  const [regimeIndexSymbol, setRegimeIndexSymbol] = useState('^NSEI');
+  const [regimeRule, setRegimeRule] = useState('sma_200');
+  const [showRegimeOptions, setShowRegimeOptions] = useState(false);
+  const [hideVetoedSignals, setHideVetoedSignals] = useState(true);
+  const [liveRegime, setLiveRegime] = useState<MarketRegimeStatus | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<ScreenerResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch real-time market regime on load or when settings change
+  useEffect(() => {
+    let isMounted = true;
+    const fetchRegime = async () => {
+      try {
+        const res = await fetch(`http://localhost:8000/api/screener/regime?benchmark_symbol=${encodeURIComponent(regimeIndexSymbol)}&regime_rule=${encodeURIComponent(regimeRule)}`);
+        if (res.ok) {
+          const rData = await res.json();
+          if (isMounted) setLiveRegime(rData);
+        }
+      } catch (e) {
+        // non-blocking
+      }
+    };
+    fetchRegime();
+    return () => { isMounted = false; };
+  }, [regimeIndexSymbol, regimeRule]);
 
   const presets = [
     { 
@@ -75,7 +101,10 @@ Sell = CrossUnder(Trend, 0)`
           scan_type: scanType,
           custom_formula: scanType === 'Custom Formula' ? customFormula : null,
           lookback_days: lookbackDays,
-          signal_filter: signalFilter
+          signal_filter: signalFilter,
+          regime_filter: enableRegimeFilter,
+          regime_index_symbol: regimeIndexSymbol,
+          regime_rule: regimeRule
         })
       });
 
@@ -86,6 +115,9 @@ Sell = CrossUnder(Trend, 0)`
 
       const result: ScreenerResponse = await res.json();
       setData(result);
+      if (result.regime) {
+        setLiveRegime(result.regime);
+      }
     } catch (err: any) {
       setError(err.message || 'Error executing scan');
     } finally {
@@ -93,10 +125,12 @@ Sell = CrossUnder(Trend, 0)`
     }
   };
 
-  const buyMatchesCount = data?.results.filter(r => r.signal_type === 'BUY').length ?? 0;
+  const activeBuyCount = data?.results.filter(r => r.signal_type === 'BUY' && !r.is_regime_vetoed).length ?? 0;
+  const vetoedBuyCount = data?.results.filter(r => r.signal_type === 'BUY' && r.is_regime_vetoed).length ?? 0;
   const sellMatchesCount = data?.results.filter(r => r.signal_type === 'SELL').length ?? 0;
 
   const filteredResults = data?.results.filter(r => {
+    if (hideVetoedSignals && r.is_regime_vetoed) return false;
     if (signalFilter === 'BUY') return r.signal_type === 'BUY';
     if (signalFilter === 'SELL') return r.signal_type === 'SELL';
     return true;
@@ -104,10 +138,11 @@ Sell = CrossUnder(Trend, 0)`
 
   const handleExportCSV = () => {
     if (!filteredResults.length) return;
-    const headers = ['Symbol', 'Signal Type', 'Timing', 'Close Price (Rs)', 'Day Change %', '100 SMA', 'SuperTrend', 'Volume Ratio', 'Delivery %', 'RSI 14', 'Trigger Rationale', 'Date'];
+    const headers = ['Symbol', 'Signal Type', 'Regime Status', 'Timing', 'Close Price (Rs)', 'Day Change %', '100 SMA', 'SuperTrend', 'Volume Ratio', 'Delivery %', 'RSI 14', 'Trigger Rationale', 'Date'];
     const rows = filteredResults.map(r => [
       r.symbol,
       r.signal_type,
+      r.is_regime_vetoed ? 'Vetoed (Cash Protection)' : 'Allowed',
       r.signal_timing || '',
       r.close,
       r.change_pct,
@@ -116,7 +151,7 @@ Sell = CrossUnder(Trend, 0)`
       r.volume_ratio,
       r.delivery_pct,
       r.rsi,
-      `"${r.signal_details.replace(/"/g, '""')}"`,
+      `"${(r.is_regime_vetoed ? `[CASH DEFENSE VETO] ` : '') + r.signal_details.replace(/"/g, '""')}"`,
       r.date
     ]);
     const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -222,6 +257,113 @@ Sell = CrossUnder(Trend, 0)`
           </div>
         )}
 
+        {/* Market Regime: Index Cash Protection Accordion */}
+        <div className="border border-zinc-800/80 rounded-lg overflow-hidden bg-[#0d1117]/80">
+          <button
+            type="button"
+            onClick={() => setShowRegimeOptions(!showRegimeOptions)}
+            className="w-full flex items-center justify-between p-2.5 text-xs font-semibold text-zinc-300 hover:text-white transition-colors bg-zinc-900/50"
+          >
+            <div className="flex items-center gap-2 flex-wrap">
+              <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>Market Regime: Index Cash Protection</span>
+              {enableRegimeFilter ? (
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-cyan-950/80 border border-cyan-700/60 text-cyan-300 font-mono flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3 text-cyan-400" /> Protected
+                </span>
+              ) : (
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-400 font-mono">
+                  Off
+                </span>
+              )}
+              {liveRegime && (
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                  liveRegime.is_bullish 
+                    ? 'bg-emerald-950/60 border-emerald-700/60 text-emerald-300' 
+                    : 'bg-rose-950/60 border-rose-700/60 text-rose-300'
+                }`}>
+                  {liveRegime.is_bullish ? '🐂 Bull Market' : '🐻 Bearish / Cash Defense'} ({liveRegime.benchmark_name} ₹{liveRegime.close.toLocaleString()})
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-zinc-500 hidden sm:inline font-mono">
+                {enableRegimeFilter ? `${regimeIndexSymbol} > ${regimeRule.toUpperCase().replace('_', ' ')}` : 'Cash defense disabled'}
+              </span>
+              <ChevronRight className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${showRegimeOptions ? 'rotate-90' : ''}`} />
+            </div>
+          </button>
+
+          {showRegimeOptions && (
+            <div className="p-3 space-y-3 border-t border-zinc-800/80 bg-black/30 text-xs">
+              <div className="flex items-center justify-between">
+                <label className="text-xs text-zinc-200 font-medium flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={enableRegimeFilter}
+                    onChange={e => setEnableRegimeFilter(e.target.checked)}
+                    className="rounded border-zinc-700 text-cyan-500 focus:ring-cyan-500 bg-zinc-800 w-4 h-4"
+                  />
+                  <span>Enable Index Cash Protection</span>
+                </label>
+                <span className="text-[10px] text-zinc-500 font-mono">Avoid Bear Breakouts</span>
+              </div>
+
+              {enableRegimeFilter && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2 border-t border-zinc-800/60">
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block mb-1">Benchmark Index</label>
+                    <input
+                      type="text"
+                      value={regimeIndexSymbol}
+                      onChange={e => setRegimeIndexSymbol(e.target.value.toUpperCase())}
+                      placeholder="^NSEI (Nifty 50)"
+                      className="w-full bg-[#0d1117] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-zinc-400 block mb-1">Regime Defense Rule</label>
+                    <select
+                      value={regimeRule}
+                      onChange={e => setRegimeRule(e.target.value)}
+                      className="w-full bg-[#0d1117] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                    >
+                      <option value="sma_200">Nifty 50 &gt; 200 SMA (Institutional Macro Bull - Max Profit)</option>
+                      <option value="sma_100">Nifty 50 &gt; 100 SMA (Intermediate Macro Trend)</option>
+                      <option value="sma_50">Nifty 50 &gt; 50 SMA (Tactical Trend - Lowest Drawdown)</option>
+                      <option value="supertrend">Nifty 50 SuperTrend(10, 3) Bullish</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {liveRegime && enableRegimeFilter && (
+                <div className={`p-2.5 rounded-lg border text-xs leading-relaxed ${
+                  liveRegime.is_bullish 
+                    ? 'bg-emerald-950/20 border-emerald-900/40 text-emerald-300' 
+                    : 'bg-cyan-950/30 border-cyan-900/40 text-cyan-200'
+                }`}>
+                  <div className="font-semibold flex items-center gap-1.5 mb-1">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <span>Live Index Status: {liveRegime.benchmark_name} ({liveRegime.benchmark_symbol})</span>
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] uppercase font-bold ${liveRegime.is_bullish ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      [{liveRegime.status}]
+                    </span>
+                  </div>
+                  <div>
+                    {liveRegime.message}
+                  </div>
+                </div>
+              )}
+
+              <div className="p-2 rounded bg-cyan-950/20 border border-cyan-900/30 text-[11px] text-cyan-200/90 leading-tight">
+                🛡️ <strong>Cash Defense in Screener:</strong> When enabled, any new BUY triggers are vetoed while the benchmark index ({regimeIndexSymbol}) is in a downtrend. Keeps portfolio safely in cash during market corrections, cutting out false breakouts.
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <button
             onClick={handleScan}
@@ -248,7 +390,7 @@ Sell = CrossUnder(Trend, 0)`
                       : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
-                  All ({data.match_count})
+                  All ({filteredResults.length})
                 </button>
                 <button
                   onClick={() => setSignalFilter('BUY')}
@@ -258,7 +400,7 @@ Sell = CrossUnder(Trend, 0)`
                       : 'text-emerald-400/80 hover:text-emerald-300'
                   }`}
                 >
-                  <TrendingUp className="w-3 h-3" /> Buy ({buyMatchesCount})
+                  <TrendingUp className="w-3 h-3" /> Buy ({activeBuyCount}{vetoedBuyCount > 0 && !hideVetoedSignals ? ` + ${vetoedBuyCount} vetoed` : ''})
                 </button>
                 <button
                   onClick={() => setSignalFilter('SELL')}
@@ -285,6 +427,47 @@ Sell = CrossUnder(Trend, 0)`
       {/* Results Section */}
       {data && (
         <div className="bg-[#161b22] border border-zinc-800 rounded-xl p-4 flex flex-col gap-3 shadow-sm">
+          {/* Regime Defense Informational Banner */}
+          {data.regime_filter_enabled && data.regime && (
+            <div className={`p-3 rounded-xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs shadow-sm ${
+              data.regime.is_bullish 
+                ? 'bg-emerald-950/30 border-emerald-800/50 text-emerald-300' 
+                : 'bg-gradient-to-r from-cyan-950/40 via-amber-950/30 to-rose-950/30 border-cyan-700/60 text-cyan-200'
+            }`}>
+              <div className="flex items-start gap-2.5">
+                <ShieldCheck className={`w-5 h-5 shrink-0 mt-0.5 ${data.regime.is_bullish ? 'text-emerald-400' : 'text-cyan-400'}`} />
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <span>{data.regime.is_bullish ? 'Market Regime: Bullish Environment' : 'Market Regime Cash Protection Active'}</span>
+                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono uppercase font-bold ${
+                      data.regime.is_bullish ? 'bg-emerald-900/60 text-emerald-300' : 'bg-rose-900/60 text-rose-300'
+                    }`}>
+                      {data.regime.benchmark_symbol} &gt; {data.regime.regime_rule.toUpperCase().replace('_', ' ')}: {data.regime.status}
+                    </span>
+                  </div>
+                  <div className="text-zinc-300 text-[11px]">
+                    {data.regime.message}
+                    {vetoedBuyCount > 0 && (
+                      <span className="ml-1 text-amber-300 font-semibold">
+                        (Vetoed {vetoedBuyCount} false breakout BUY setups).
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {vetoedBuyCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setHideVetoedSignals(!hideVetoedSignals)}
+                  className="px-3 py-1.5 rounded-lg border text-xs font-semibold shrink-0 transition-all bg-zinc-900/80 border-cyan-700/80 hover:bg-zinc-800 text-cyan-300 shadow-sm"
+                >
+                  {hideVetoedSignals ? `Inspect Vetoed Setups (${vetoedBuyCount})` : `Hide Vetoed Setups (${vetoedBuyCount})`}
+                </button>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-2.5">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-white uppercase tracking-wider">
@@ -298,7 +481,12 @@ Sell = CrossUnder(Trend, 0)`
             <div className="flex items-center gap-3 text-xs">
               <div className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-emerald-400 font-mono font-semibold">{buyMatchesCount} Buy Triggers</span>
+                <span className="text-emerald-400 font-mono font-semibold">{activeBuyCount} Buy Triggers</span>
+                {vetoedBuyCount > 0 && (
+                  <span className="text-amber-400 font-mono text-[11px] font-semibold bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.5 rounded">
+                    🛡️ {vetoedBuyCount} Vetoed by Regime
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-rose-400" />
@@ -337,11 +525,18 @@ Sell = CrossUnder(Trend, 0)`
                   const isSell = r.signal_type === 'SELL';
 
                   return (
-                    <tr key={idx} className="hover:bg-zinc-800/30 transition-colors">
+                    <tr key={idx} className={`transition-colors ${r.is_regime_vetoed ? 'bg-amber-950/10 hover:bg-amber-950/20' : 'hover:bg-zinc-800/30'}`}>
                       {/* Signal Badge */}
                       <td className="p-2.5">
                         <div className="flex items-center gap-1.5">
-                          {isBuy ? (
+                          {r.is_regime_vetoed ? (
+                            <span 
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950/90 text-amber-300 border border-amber-600/70 shadow-sm line-through opacity-85"
+                              title={r.regime_veto_reason}
+                            >
+                              <ShieldAlert className="w-3 h-3 text-amber-400 shrink-0" /> VETOED BUY
+                            </span>
+                          ) : isBuy ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-600/70 shadow-sm">
                               <TrendingUp className="w-3 h-3 text-emerald-400" /> BUY
                             </span>
@@ -430,7 +625,12 @@ Sell = CrossUnder(Trend, 0)`
                       </td>
 
                       {/* Trigger Rationale */}
-                      <td className="p-2.5 text-zinc-400 text-[11px] max-w-xs truncate" title={r.signal_details}>
+                      <td className="p-2.5 text-zinc-400 text-[11px] max-w-xs truncate" title={r.is_regime_vetoed ? `${r.regime_veto_reason} | ${r.signal_details}` : r.signal_details}>
+                        {r.is_regime_vetoed && (
+                          <span className="text-amber-400 font-semibold mr-1">
+                            [CASH DEFENSE]
+                          </span>
+                        )}
                         {r.signal_details}
                       </td>
 
@@ -452,10 +652,28 @@ Sell = CrossUnder(Trend, 0)`
                   <tr>
                     <td colSpan={11} className="p-8 text-center text-zinc-500 font-sans">
                       <div className="flex flex-col items-center justify-center gap-2">
-                        <ShieldCheck className="w-8 h-8 text-zinc-600" />
-                        <div className="font-semibold text-zinc-400">No {signalFilter !== 'ALL' ? signalFilter : ''} signals found</div>
-                        <div className="text-xs text-zinc-500 max-w-sm">
-                          Try increasing the "Signal Horizon" to Last 5 or 15 Days, or choose "All Active Trend Positions" to inspect currently active trends.
+                        <ShieldCheck className="w-8 h-8 text-cyan-400" />
+                        <div className="font-semibold text-zinc-200">
+                          {vetoedBuyCount > 0 
+                            ? `${vetoedBuyCount} BUY setups were vetoed by Market Regime Cash Protection` 
+                            : `No ${signalFilter !== 'ALL' ? signalFilter : ''} signals found`}
+                        </div>
+                        <div className="text-xs text-zinc-400 max-w-md">
+                          {vetoedBuyCount > 0 ? (
+                            <div className="space-y-2">
+                              <div>
+                                Broad market benchmark ({data.regime?.benchmark_name ?? regimeIndexSymbol}) is in a Bear regime. Buy entries are blocked to prevent false breakouts and keep capital safely in cash.
+                              </div>
+                              <button 
+                                onClick={() => setHideVetoedSignals(false)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1 bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-700/70 text-cyan-300 rounded font-semibold text-xs transition-colors"
+                              >
+                                <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Inspect {vetoedBuyCount} Vetoed Setups
+                              </button>
+                            </div>
+                          ) : (
+                            'Try increasing the "Signal Horizon" to Last 5 or 15 Days, or choose "All Active Trend Positions" to inspect currently active trends.'
+                          )}
                         </div>
                       </div>
                     </td>

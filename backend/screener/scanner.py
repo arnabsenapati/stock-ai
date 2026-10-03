@@ -41,15 +41,124 @@ class MarketScreener:
         }
     }
 
+    def get_market_regime(
+        self,
+        benchmark_symbol: str = "^NSEI",
+        regime_rule: str = "sma_200"
+    ) -> Dict[str, Any]:
+        """
+        Calculates the broad market regime for a benchmark index.
+        Determines whether the market environment is safe for BUY entries 
+        or whether capital should be protected in cash.
+        """
+        clean_symbol = benchmark_symbol.upper().strip() if benchmark_symbol else "^NSEI"
+        bench_names = {
+            "^NSEI": "Nifty 50",
+            "^NSEBANK": "Nifty Bank",
+            "^CNXIT": "Nifty IT"
+        }
+        bench_name = bench_names.get(clean_symbol, clean_symbol)
+
+        try:
+            df = db.get_symbol_data(clean_symbol)
+            if df.empty:
+                df = db.get_symbol_data("^NSEI")
+                clean_symbol = "^NSEI"
+                bench_name = "Nifty 50"
+
+            if df.empty or len(df) < 20:
+                return {
+                    "benchmark_symbol": clean_symbol,
+                    "benchmark_name": bench_name,
+                    "close": 0.0,
+                    "threshold": 0.0,
+                    "diff_pct": 0.0,
+                    "regime_rule": regime_rule,
+                    "rule_label": regime_rule.upper().replace("_", " "),
+                    "is_bullish": True,
+                    "status": "BULL",
+                    "date": "",
+                    "message": "Benchmark data insufficient - defaulting to Bullish"
+                }
+
+            df = df.sort_values('date').reset_index(drop=True)
+            close = float(df['close'].iloc[-1])
+            date_str = str(df['date'].iloc[-1])[:10]
+
+            if regime_rule == "sma_50":
+                ma = ta.sma(df['close'], 50)
+                threshold = float(ma.iloc[-1]) if ma is not None and not pd.isna(ma.iloc[-1]) else close
+                rule_label = f"{bench_name} > 50 SMA (Tactical Trend)"
+                is_bullish = bool(close > threshold)
+            elif regime_rule == "sma_100":
+                ma = ta.sma(df['close'], 100)
+                threshold = float(ma.iloc[-1]) if ma is not None and not pd.isna(ma.iloc[-1]) else close
+                rule_label = f"{bench_name} > 100 SMA (Intermediate Macro Trend)"
+                is_bullish = bool(close > threshold)
+            elif regime_rule == "supertrend":
+                st = ta.supertrend(df['high'], df['low'], df['close'], 10, 3.0)
+                st_trend = int(st['supertrend_trend'].iloc[-1]) if 'supertrend_trend' in st else 1
+                threshold = float(st['supertrend'].iloc[-1]) if 'supertrend' in st else close
+                rule_label = f"{bench_name} SuperTrend (10, 3.0) Bullish"
+                is_bullish = bool(st_trend > 0)
+            else:  # default sma_200
+                ma = ta.sma(df['close'], 200)
+                threshold = float(ma.iloc[-1]) if ma is not None and not pd.isna(ma.iloc[-1]) else close
+                rule_label = f"{bench_name} > 200 SMA (Institutional Macro Bull)"
+                is_bullish = bool(close > threshold)
+
+            diff_pct = round(((close - threshold) / threshold) * 100.0, 2) if threshold > 0 else 0.0
+            status = "BULL" if is_bullish else "BEAR"
+
+            if is_bullish:
+                message = f"{bench_name} is in a Bullish Regime (Rs. {close:,.2f} is {diff_pct:+.2f}% above {rule_label.split('(')[0].strip()}). BUY setups permitted."
+            else:
+                message = f"{bench_name} is in Bearish / Cash Defense Regime (Rs. {close:,.2f} is {diff_pct:+.2f}% below {rule_label.split('(')[0].strip()}). New BUY signals vetoed to protect capital."
+
+            return {
+                "benchmark_symbol": clean_symbol,
+                "benchmark_name": bench_name,
+                "close": round(close, 2),
+                "threshold": round(threshold, 2),
+                "diff_pct": diff_pct,
+                "regime_rule": regime_rule,
+                "rule_label": rule_label,
+                "is_bullish": is_bullish,
+                "status": status,
+                "date": date_str,
+                "message": message
+            }
+        except Exception as e:
+            return {
+                "benchmark_symbol": clean_symbol,
+                "benchmark_name": bench_name,
+                "close": 0.0,
+                "threshold": 0.0,
+                "diff_pct": 0.0,
+                "regime_rule": regime_rule,
+                "rule_label": regime_rule,
+                "is_bullish": True,
+                "status": "BULL",
+                "date": "",
+                "message": f"Regime calculation error: {str(e)}"
+            }
+
     def scan_universe(
         self,
         symbols: List[str],
         scan_type: str,
         custom_formula: Optional[str] = None,
         lookback_days: int = 3,
-        signal_filter: str = "ALL"
+        signal_filter: str = "ALL",
+        regime_filter: bool = False,
+        regime_index_symbol: str = "^NSEI",
+        regime_rule: str = "sma_200"
     ) -> List[Dict[str, Any]]:
-        """Scans a list of symbols against the chosen preset or custom formula"""
+        """Scans a list of symbols against the chosen preset or custom formula with optional regime cash protection"""
+        regime_info = None
+        if regime_filter:
+            regime_info = self.get_market_regime(regime_index_symbol, regime_rule)
+
         matches = []
         for sym in symbols:
             df = db.get_symbol_data(sym)
@@ -66,14 +175,28 @@ class MarketScreener:
                     signal_filter=signal_filter
                 )
                 if res is not None:
+                    # Apply regime protection
+                    if regime_filter and regime_info and not regime_info["is_bullish"]:
+                        if res.get("signal_type") == "BUY":
+                            res["is_regime_vetoed"] = True
+                            res["regime_veto_reason"] = (
+                                f"Cash Defense Veto: {regime_info['benchmark_name']} is below "
+                                f"{regime_rule.upper().replace('_', ' ')} (Rs. {regime_info['threshold']:,.2f})"
+                            )
+                        else:
+                            res["is_regime_vetoed"] = False
+                    else:
+                        res["is_regime_vetoed"] = False
+
                     matches.append(res)
             except Exception as e:
                 # Silently skip errors on individual symbols during bulk scan
                 continue
 
-        # Sort matches: BUY first, then Today signals first, then by day change
+        # Sort matches: Non-vetoed first, then BUY first, then Today signals first, then by day change
         matches.sort(
             key=lambda x: (
+                1 if x.get('is_regime_vetoed') else 0,
                 0 if x.get('signal_type') == 'BUY' else 1,
                 0 if x.get('signal_timing') == 'Today' else 1,
                 -x.get('change_pct', 0.0)

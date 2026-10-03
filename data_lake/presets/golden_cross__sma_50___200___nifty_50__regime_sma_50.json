@@ -1,0 +1,21 @@
+{
+  "strategy_name": "Golden Cross (SMA 50 / 200)",
+  "universe": "Nifty 50",
+  "initial_capital": 100000.0,
+  "risk_per_trade_pct": 25.0,
+  "stop_loss_pct": 6.0,
+  "take_profit_pct": 34.0,
+  "trailing_stop_pct": 7.5,
+  "max_positions": 10,
+  "compounding": true,
+  "regime_filter": true,
+  "regime_rule": "sma_50",
+  "best_metric_name": "sharpe_ratio",
+  "best_metric_value": 0.12,
+  "total_trades": 60,
+  "win_rate": 0.0,
+  "total_return_pct": 40.71,
+  "max_drawdown_pct": 12.58,
+  "sharpe_ratio": 0.12,
+  "cagr_pct": 7.16
+}

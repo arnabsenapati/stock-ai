@@ -21,6 +21,7 @@ from backend.backtester.engine import backtest_engine
 from backend.backtester.strategy_dsl import PRESET_STRATEGIES
 from backend.screener.scanner import screener
 from backend.backtester.optimizer import strategy_optimizer
+from backend.portfolio.scanner import portfolio_scanner
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -91,6 +92,9 @@ class ScreenerRequest(BaseModel):
     custom_formula: Optional[str] = None
     lookback_days: int = 3
     signal_filter: str = "ALL"
+    regime_filter: bool = False
+    regime_index_symbol: str = "^NSEI"
+    regime_rule: str = "sma_200"
 
 class OptimizeStartRequest(BaseModel):
     strategy_name: str = "SuperTrend + 100 SMA Trend Rider (Optimal)"
@@ -134,6 +138,38 @@ class StrategyPresetSaveRequest(BaseModel):
     max_drawdown_pct: Optional[float] = 0.0
     sharpe_ratio: Optional[float] = 0.0
     cagr_pct: Optional[float] = 0.0
+
+class PortfolioPositionCreateRequest(BaseModel):
+    symbol: str
+    strategy_name: str
+    strategy_code: Optional[str] = None
+    buy_date: str
+    buy_price: float
+    qty: int
+    stop_loss_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    notes: Optional[str] = None
+
+class PortfolioPositionUpdateRequest(BaseModel):
+    symbol: Optional[str] = None
+    strategy_name: Optional[str] = None
+    strategy_code: Optional[str] = None
+    buy_date: Optional[str] = None
+    buy_price: Optional[float] = None
+    qty: Optional[int] = None
+    stop_loss_pct: Optional[float] = None
+    take_profit_pct: Optional[float] = None
+    trailing_stop_pct: Optional[float] = None
+    notes: Optional[str] = None
+
+class PortfolioPositionCloseRequest(BaseModel):
+    exit_date: str
+    exit_price: float
+    exit_reason: Optional[str] = "Manual Exit"
+
+class PortfolioEodScanRequest(BaseModel):
+    strategy_name: Optional[str] = None
 
 # Routes
 @app.get("/")
@@ -425,17 +461,31 @@ def run_backtest(req: BacktestRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.get("/api/screener/regime")
+def get_screener_regime(
+    benchmark_symbol: str = Query("^NSEI"),
+    regime_rule: str = Query("sma_200")
+):
+    """Fetch real-time market regime status for the screener benchmark index"""
+    return screener.get_market_regime(benchmark_symbol, regime_rule)
+
 @app.post("/api/screener/scan")
 def run_screener(req: ScreenerRequest):
-    """Scan universe based on selected preset or custom formula"""
+    """Scan universe based on selected preset or custom formula with optional market regime cash defense"""
     symbols = POPULAR_UNIVERSES.get(req.universe, NIFTY_50_SYMBOLS)
     results = screener.scan_universe(
         symbols=symbols,
         scan_type=req.scan_type,
         custom_formula=req.custom_formula,
         lookback_days=req.lookback_days,
-        signal_filter=req.signal_filter
+        signal_filter=req.signal_filter,
+        regime_filter=req.regime_filter,
+        regime_index_symbol=req.regime_index_symbol,
+        regime_rule=req.regime_rule
     )
+    regime_info = screener.get_market_regime(req.regime_index_symbol, req.regime_rule) if req.regime_filter else None
+    vetoed_count = sum(1 for r in results if r.get('is_regime_vetoed', False))
+
     return {
         "universe": req.universe,
         "scan_type": req.scan_type,
@@ -443,7 +493,10 @@ def run_screener(req: ScreenerRequest):
         "signal_filter": req.signal_filter,
         "scanned_count": len(symbols),
         "match_count": len(results),
-        "results": results
+        "results": results,
+        "regime": regime_info,
+        "regime_filter_enabled": req.regime_filter,
+        "regime_vetoed_count": vetoed_count
     }
 
 # ==========================================
@@ -560,6 +613,221 @@ def save_preset_profile(req: StrategyPresetSaveRequest):
 def get_all_preset_profiles():
     """List all saved strategy + basket profiles"""
     return {"profiles": db.list_strategy_basket_profiles()}
+
+# ==========================================
+# Real-World Strategy Portfolio & EoD Exit Scanner Endpoints
+# ==========================================
+@app.get("/api/portfolio")
+def get_portfolio(
+    status: Optional[str] = Query("OPEN"),
+    strategy_name: Optional[str] = Query(None)
+):
+    """
+    Fetch portfolio positions (OPEN or CLOSED).
+    For OPEN positions, enriches with latest close price, day change, unrealized PnL, and current value.
+    For CLOSED positions, computes realized PnL and return %.
+    """
+    positions = db.get_portfolio_positions(status=status, strategy_name=strategy_name)
+    enriched_positions = []
+    
+    for pos in positions:
+        p = dict(pos)
+        sym = p["symbol"]
+        qty = int(p["qty"])
+        buy_px = float(p["buy_price"])
+        invested = round(buy_px * qty, 2)
+        p["invested_value"] = invested
+
+        if p.get("status") == "OPEN":
+            df = db.get_symbol_data(sym)
+            if not df.empty and len(df) >= 2:
+                last_c = float(df['close'].iloc[-1])
+                prev_c = float(df['close'].iloc[-2])
+                p["current_price"] = last_c
+                p["latest_date"] = str(df['date'].iloc[-1])[:10]
+                p["day_change_pct"] = round(((last_c - prev_c) / prev_c) * 100.0, 2)
+                p["current_value"] = round(last_c * qty, 2)
+                p["unrealized_pnl"] = round((last_c - buy_px) * qty, 2)
+                p["unrealized_pnl_pct"] = round(((last_c - buy_px) / buy_px) * 100.0, 2)
+            else:
+                p["current_price"] = buy_px
+                p["latest_date"] = None
+                p["day_change_pct"] = 0.0
+                p["current_value"] = invested
+                p["unrealized_pnl"] = 0.0
+                p["unrealized_pnl_pct"] = 0.0
+        else: # CLOSED
+            exit_px = float(p.get("exit_price") or buy_px)
+            realized_pnl = round((exit_px - buy_px) * qty, 2)
+            p["realized_pnl"] = realized_pnl
+            p["realized_pnl_pct"] = round(((exit_px - buy_px) / buy_px) * 100.0, 2)
+            p["exit_value"] = round(exit_px * qty, 2)
+
+        enriched_positions.append(p)
+
+    return {"positions": enriched_positions, "count": len(enriched_positions)}
+
+@app.get("/api/portfolio/summary")
+def get_portfolio_summary():
+    """
+    High-level dashboard summary of portfolio holdings, PnL, active strategies and sell alert count.
+    """
+    open_positions = db.get_portfolio_positions(status="OPEN")
+    closed_positions = db.get_portfolio_positions(status="CLOSED")
+    strategies = db.get_portfolio_strategies()
+
+    total_invested = 0.0
+    total_current_val = 0.0
+    for pos in open_positions:
+        qty = int(pos["qty"])
+        buy_px = float(pos["buy_price"])
+        invested = buy_px * qty
+        total_invested += invested
+        
+        df = db.get_symbol_data(pos["symbol"])
+        if not df.empty:
+            cur_px = float(df['close'].iloc[-1])
+            total_current_val += cur_px * qty
+        else:
+            total_current_val += invested
+
+    total_realized_pnl = 0.0
+    for pos in closed_positions:
+        qty = int(pos["qty"])
+        buy_px = float(pos["buy_price"])
+        exit_px = float(pos.get("exit_price") or buy_px)
+        total_realized_pnl += (exit_px - buy_px) * qty
+
+    total_unrealized_pnl = total_current_val - total_invested
+    total_unrealized_pct = round((total_unrealized_pnl / total_invested * 100.0), 2) if total_invested > 0 else 0.0
+
+    # Quick scan for sell alerts
+    scan_res = portfolio_scanner.scan_portfolio()
+    sell_alerts_count = scan_res.get("sell_tomorrow_count", 0)
+
+    return {
+        "total_invested": round(total_invested, 2),
+        "total_current_value": round(total_current_val, 2),
+        "total_unrealized_pnl": round(total_unrealized_pnl, 2),
+        "total_unrealized_pnl_pct": total_unrealized_pct,
+        "total_realized_pnl": round(total_realized_pnl, 2),
+        "open_positions_count": len(open_positions),
+        "closed_positions_count": len(closed_positions),
+        "strategies_count": len(strategies),
+        "active_strategies": strategies,
+        "sell_tomorrow_alerts_count": sell_alerts_count,
+        "latest_market_session": scan_res.get("latest_market_session")
+    }
+
+@app.get("/api/portfolio/strategies")
+def get_portfolio_strategies():
+    """
+    Returns user portfolio strategies and preset strategies list.
+    """
+    portfolio_strats = db.get_portfolio_strategies()
+    all_presets = list(PRESET_STRATEGIES.keys())
+    combined = sorted(list(set(portfolio_strats + all_presets)))
+    return {
+        "portfolio_strategies": portfolio_strats,
+        "preset_strategies": all_presets,
+        "all_strategies": combined
+    }
+
+@app.post("/api/portfolio/positions")
+def add_portfolio_position(req: PortfolioPositionCreateRequest):
+    """
+    Add a new real-world stock trade to the portfolio linked to a strategy.
+    """
+    strat_code = req.strategy_code
+    if not strat_code:
+        strat_code = PRESET_STRATEGIES.get(req.strategy_name)
+
+    sym = req.symbol.upper().strip()
+    existing = db.get_symbol_data(sym)
+    if existing.empty:
+        try:
+            yf_feed.fetch_symbol_history(sym, period="2y")
+        except Exception:
+            pass
+
+    pos_id = db.add_portfolio_position({
+        "symbol": sym,
+        "strategy_name": req.strategy_name,
+        "strategy_code": strat_code,
+        "buy_date": req.buy_date,
+        "buy_price": req.buy_price,
+        "qty": req.qty,
+        "stop_loss_pct": req.stop_loss_pct,
+        "take_profit_pct": req.take_profit_pct,
+        "trailing_stop_pct": req.trailing_stop_pct,
+        "status": "OPEN",
+        "notes": req.notes
+    })
+    return {"status": "created", "position_id": pos_id}
+
+@app.get("/api/portfolio/positions/{pos_id}")
+def get_portfolio_position(pos_id: str):
+    """
+    Get a single portfolio position by ID.
+    """
+    pos = db.get_portfolio_position(pos_id)
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+    return {"position": pos}
+
+@app.put("/api/portfolio/positions/{pos_id}")
+def update_portfolio_position(pos_id: str, req: PortfolioPositionUpdateRequest):
+    """
+    Update position details.
+    """
+    updates = req.dict(exclude_unset=True)
+    if not updates:
+        return {"status": "no_changes"}
+    
+    if "strategy_name" in updates and "strategy_code" not in updates:
+        updates["strategy_code"] = PRESET_STRATEGIES.get(updates["strategy_name"])
+
+    success = db.update_portfolio_position(pos_id, updates)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update position")
+    return {"status": "updated", "position_id": pos_id}
+
+@app.delete("/api/portfolio/positions/{pos_id}")
+def delete_portfolio_position(pos_id: str):
+    """
+    Delete a position permanently.
+    """
+    success = db.delete_portfolio_position(pos_id)
+    return {"status": "deleted" if success else "failed", "position_id": pos_id}
+
+@app.post("/api/portfolio/positions/{pos_id}/close")
+def close_portfolio_position(pos_id: str, req: PortfolioPositionCloseRequest):
+    """
+    Close an open position (record exit).
+    """
+    pos = db.get_portfolio_position(pos_id)
+    if not pos:
+        raise HTTPException(status_code=404, detail="Position not found")
+    
+    db.close_portfolio_position(
+        pos_id=pos_id,
+        exit_date=req.exit_date,
+        exit_price=req.exit_price,
+        exit_reason=req.exit_reason
+    )
+    return {"status": "closed", "position_id": pos_id}
+
+@app.post("/api/portfolio/eod-scan")
+def run_portfolio_eod_scan(req: Optional[PortfolioEodScanRequest] = None):
+    """
+    Execute End-of-Day Exit Scan across open portfolio positions.
+    Evaluates each position against its specific purchase strategy rule,
+    Stop Loss %, Take Profit %, and Trailing Stop % to determine if it should
+    be SOLD tomorrow at market open (09:15 AM) or held.
+    """
+    strat = req.strategy_name if req else None
+    results = portfolio_scanner.scan_portfolio(strategy_name=strat)
+    return results
 
 if __name__ == "__main__":
     import uvicorn

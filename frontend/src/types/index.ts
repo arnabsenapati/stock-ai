@@ -136,6 +136,20 @@ export interface BacktestResponse {
   monthly_returns: MonthlyReturnItem[];
 }
 
+export interface MarketRegimeStatus {
+  benchmark_symbol: string;
+  benchmark_name?: string;
+  close: number;
+  threshold: number;
+  diff_pct: number;
+  regime_rule: string;
+  rule_label: string;
+  is_bullish: boolean;
+  status: 'BULL' | 'BEAR';
+  date: string;
+  message: string;
+}
+
 export interface ScreenerMatch {
   symbol: string;
   close: number;
@@ -153,6 +167,8 @@ export interface ScreenerMatch {
   signal_date?: string;
   signal_details: string;
   date: string;
+  is_regime_vetoed?: boolean;
+  regime_veto_reason?: string;
 }
 
 export interface ScreenerResponse {
@@ -163,6 +179,9 @@ export interface ScreenerResponse {
   scanned_count: number;
   match_count: number;
   results: ScreenerMatch[];
+  regime?: MarketRegimeStatus | null;
+  regime_filter_enabled?: boolean;
+  regime_vetoed_count?: number;
 }
 
 export interface OptimizationTrial {
@@ -256,3 +275,96 @@ export interface SyncStatusResponse {
   symbols_behind_count: number;
   symbols_behind: string[];
 }
+
+export interface PortfolioPosition {
+  id: string;
+  symbol: string;
+  strategy_name: string;
+  strategy_code?: string | null;
+  strategy_evaluated?: boolean;
+  buy_date: string;
+  buy_price: number;
+  qty: number;
+  invested_value: number;
+  current_price?: number;
+  current_value?: number;
+  unrealized_pnl?: number;
+  unrealized_pnl_pct?: number;
+  day_change_pct?: number;
+  holding_days?: number;
+  peak_high_since_buy?: number;
+  stop_loss_pct?: number | null;
+  stop_loss_price?: number | null;
+  take_profit_pct?: number | null;
+  take_profit_price?: number | null;
+  trailing_stop_pct?: number | null;
+  trailing_stop_price?: number | null;
+  action?: 'SELL' | 'HOLD';
+  verdict_badge?: 'SELL_STRATEGY' | 'SELL_STOP_LOSS' | 'SELL_TAKE_PROFIT' | 'SELL_TRAILING_STOP' | 'WATCH_WARNING' | 'HOLD_HEALTHY';
+  action_urgency?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  recommendation?: string;
+  trigger_reason?: string;
+  indicators?: {
+    supertrend?: number;
+    supertrend_trend?: number;
+    rsi_14?: number;
+    sma_100?: number;
+    ema_50?: number;
+    ema_200?: number;
+    delivery_pct?: number;
+  };
+  latest_date?: string;
+  notes?: string;
+  status: 'OPEN' | 'CLOSED';
+  exit_date?: string | null;
+  exit_price?: number | null;
+  exit_reason?: string | null;
+  realized_pnl?: number;
+  realized_pnl_pct?: number;
+  exit_value?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface StrategySummaryItem {
+  strategy_name: string;
+  positions_count: number;
+  invested_value: number;
+  current_value: number;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number;
+  sell_tomorrow_count: number;
+  hold_count: number;
+  profitable_count: number;
+  win_rate_pct: number;
+}
+
+export interface PortfolioSummaryResponse {
+  total_invested: number;
+  total_current_value: number;
+  total_unrealized_pnl: number;
+  total_unrealized_pnl_pct: number;
+  total_realized_pnl: number;
+  open_positions_count: number;
+  closed_positions_count: number;
+  strategies_count: number;
+  active_strategies: string[];
+  sell_tomorrow_alerts_count: number;
+  latest_market_session: string | null;
+}
+
+export interface PortfolioScanResponse {
+  total_open_positions: number;
+  total_invested: number;
+  total_current_value: number;
+  total_unrealized_pnl: number;
+  total_unrealized_pnl_pct: number;
+  sell_tomorrow_count: number;
+  hold_count: number;
+  latest_market_session: string;
+  scan_timestamp: string;
+  strategy_filter: string;
+  per_strategy_summary: StrategySummaryItem[];
+  positions: PortfolioPosition[];
+}
+

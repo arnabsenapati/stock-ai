@@ -1,4 +1,6 @@
 import threading
+import uuid
+from datetime import datetime
 import duckdb
 import pandas as pd
 from pathlib import Path
@@ -61,6 +63,29 @@ class DatabaseManager:
                         value VARCHAR,
                         updated_at TIMESTAMP
                     );
+
+                    CREATE TABLE IF NOT EXISTS portfolio_positions (
+                        id VARCHAR PRIMARY KEY,
+                        symbol VARCHAR NOT NULL,
+                        strategy_name VARCHAR NOT NULL,
+                        strategy_code TEXT,
+                        buy_date DATE NOT NULL,
+                        buy_price DOUBLE NOT NULL,
+                        qty INT NOT NULL,
+                        stop_loss_pct DOUBLE,
+                        take_profit_pct DOUBLE,
+                        trailing_stop_pct DOUBLE,
+                        status VARCHAR DEFAULT 'OPEN',
+                        exit_date DATE,
+                        exit_price DOUBLE,
+                        exit_reason VARCHAR,
+                        notes TEXT,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_portfolio_status ON portfolio_positions(status);
+                    CREATE INDEX IF NOT EXISTS idx_portfolio_strategy ON portfolio_positions(strategy_name);
+                    CREATE INDEX IF NOT EXISTS idx_portfolio_symbol ON portfolio_positions(symbol);
                 """)
                 try:
                     con.execute("ALTER TABLE strategy_basket_profiles ADD COLUMN compounding BOOLEAN DEFAULT TRUE;")
@@ -366,4 +391,166 @@ class DatabaseManager:
                 "updated_at": r[19]
             } for r in rows]
 
+    def add_portfolio_position(self, pos: Dict[str, Any]) -> str:
+        """Add a new real-world trade position linked to a strategy"""
+        pos_id = pos.get("id") or f"pos_{uuid.uuid4().hex[:10]}"
+        symbol = str(pos["symbol"]).upper().strip()
+        strategy_name = str(pos["strategy_name"]).strip()
+        strategy_code = pos.get("strategy_code")
+        buy_date = str(pos["buy_date"])[:10]
+        buy_price = float(pos["buy_price"])
+        qty = int(pos["qty"])
+        stop_loss_pct = float(pos["stop_loss_pct"]) if pos.get("stop_loss_pct") is not None and pos.get("stop_loss_pct") != "" else None
+        take_profit_pct = float(pos["take_profit_pct"]) if pos.get("take_profit_pct") is not None and pos.get("take_profit_pct") != "" else None
+        trailing_stop_pct = float(pos["trailing_stop_pct"]) if pos.get("trailing_stop_pct") is not None and pos.get("trailing_stop_pct") != "" else None
+        status = str(pos.get("status", "OPEN")).upper()
+        notes = pos.get("notes")
+
+        with self._lock:
+            with self.get_connection() as con:
+                con.execute("""
+                    INSERT INTO portfolio_positions (
+                        id, symbol, strategy_name, strategy_code,
+                        buy_date, buy_price, qty,
+                        stop_loss_pct, take_profit_pct, trailing_stop_pct,
+                        status, notes, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, [
+                    pos_id, symbol, strategy_name, strategy_code,
+                    buy_date, buy_price, qty,
+                    stop_loss_pct, take_profit_pct, trailing_stop_pct,
+                    status, notes
+                ])
+        return pos_id
+
+    def update_portfolio_position(self, pos_id: str, updates: Dict[str, Any]) -> bool:
+        """Update fields of an existing portfolio position"""
+        allowed = [
+            "symbol", "strategy_name", "strategy_code", "buy_date", "buy_price",
+            "qty", "stop_loss_pct", "take_profit_pct", "trailing_stop_pct",
+            "status", "exit_date", "exit_price", "exit_reason", "notes"
+        ]
+        set_clauses = []
+        params = []
+        for k, v in updates.items():
+            if k in allowed:
+                set_clauses.append(f"{k} = ?")
+                if k == "symbol" and v is not None:
+                    params.append(str(v).upper().strip())
+                elif k in ["buy_date", "exit_date"] and v is not None:
+                    params.append(str(v)[:10])
+                elif k in ["buy_price", "exit_price", "stop_loss_pct", "take_profit_pct", "trailing_stop_pct"] and v is not None:
+                    params.append(float(v))
+                elif k == "qty" and v is not None:
+                    params.append(int(v))
+                elif k == "status" and v is not None:
+                    params.append(str(v).upper())
+                else:
+                    params.append(v)
+        
+        if not set_clauses:
+            return False
+
+        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+        params.append(pos_id)
+
+        with self._lock:
+            with self.get_connection() as con:
+                con.execute(f"""
+                    UPDATE portfolio_positions
+                    SET {', '.join(set_clauses)}
+                    WHERE id = ?
+                """, params)
+        return True
+
+    def close_portfolio_position(self, pos_id: str, exit_date: str, exit_price: float, exit_reason: Optional[str] = None) -> bool:
+        """Close an open position and record realization metrics"""
+        with self._lock:
+            with self.get_connection() as con:
+                con.execute("""
+                    UPDATE portfolio_positions
+                    SET status = 'CLOSED',
+                        exit_date = ?,
+                        exit_price = ?,
+                        exit_reason = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, [str(exit_date)[:10], float(exit_price), exit_reason, pos_id])
+        return True
+
+    def delete_portfolio_position(self, pos_id: str) -> bool:
+        """Permanently remove a position"""
+        with self._lock:
+            with self.get_connection() as con:
+                con.execute("DELETE FROM portfolio_positions WHERE id = ?", [pos_id])
+        return True
+
+    def get_portfolio_positions(self, status: Optional[str] = None, strategy_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List positions with optional status ('OPEN'|'CLOSED') and strategy filter"""
+        query = "SELECT * FROM portfolio_positions"
+        clauses = []
+        params = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status.upper())
+        if strategy_name and strategy_name != "ALL":
+            clauses.append("strategy_name = ?")
+            params.append(strategy_name)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY buy_date DESC, created_at DESC"
+
+        with self.get_connection() as con:
+            df = con.execute(query, params).df()
+            if df.empty:
+                return []
+            
+            results = []
+            for _, row in df.iterrows():
+                r_dict = row.to_dict()
+                for date_col in ["buy_date", "exit_date"]:
+                    if pd.notna(r_dict.get(date_col)):
+                        r_dict[date_col] = str(r_dict[date_col])[:10]
+                    else:
+                        r_dict[date_col] = None
+                for ts_col in ["created_at", "updated_at"]:
+                    if pd.notna(r_dict.get(ts_col)):
+                        r_dict[ts_col] = str(r_dict[ts_col])
+                    else:
+                        r_dict[ts_col] = None
+                for k, v in list(r_dict.items()):
+                    if pd.isna(v):
+                        r_dict[k] = None
+                results.append(r_dict)
+            return results
+
+    def get_portfolio_position(self, pos_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve single position by ID"""
+        with self.get_connection() as con:
+            df = con.execute("SELECT * FROM portfolio_positions WHERE id = ?", [pos_id]).df()
+            if df.empty:
+                return None
+            r_dict = df.iloc[0].to_dict()
+            for date_col in ["buy_date", "exit_date"]:
+                if pd.notna(r_dict.get(date_col)):
+                    r_dict[date_col] = str(r_dict[date_col])[:10]
+                else:
+                    r_dict[date_col] = None
+            for ts_col in ["created_at", "updated_at"]:
+                if pd.notna(r_dict.get(ts_col)):
+                    r_dict[ts_col] = str(r_dict[ts_col])
+                else:
+                    r_dict[ts_col] = None
+            for k, v in list(r_dict.items()):
+                if pd.isna(v):
+                    r_dict[k] = None
+            return r_dict
+
+    def get_portfolio_strategies(self) -> List[str]:
+        """Get distinct strategies currently present in user's portfolio"""
+        with self.get_connection() as con:
+            rows = con.execute("SELECT DISTINCT strategy_name FROM portfolio_positions WHERE strategy_name IS NOT NULL ORDER BY strategy_name").fetchall()
+            return [r[0] for r in rows if r[0]]
+
 db = DatabaseManager()
+

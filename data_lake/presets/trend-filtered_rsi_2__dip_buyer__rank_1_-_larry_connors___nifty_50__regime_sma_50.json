@@ -1,0 +1,21 @@
+{
+  "strategy_name": "Trend-Filtered RSI(2) Dip Buyer (Rank 1 - Larry Connors)",
+  "universe": "Nifty 50",
+  "initial_capital": 100000.0,
+  "risk_per_trade_pct": 20.0,
+  "stop_loss_pct": 14.0,
+  "take_profit_pct": 5.0,
+  "trailing_stop_pct": null,
+  "max_positions": 7,
+  "compounding": true,
+  "regime_filter": true,
+  "regime_rule": "sma_50",
+  "best_metric_name": "sharpe_ratio",
+  "best_metric_value": -0.19,
+  "total_trades": 757,
+  "win_rate": 0.0,
+  "total_return_pct": 21.63,
+  "max_drawdown_pct": 14.8,
+  "sharpe_ratio": -0.19,
+  "cagr_pct": 4.05
+}
